@@ -100,10 +100,6 @@ extern int SPLx_TZS_WRITE32(unsigned int sva, unsigned int val);
  * but reached by a secure write instead of secure code execution. */
 #define PL310_PREFETCH_CTRL_SVA 0x1A002F60u
 #define PL310_DATA_PREFETCH_EN  0x10000000u
-/* PL310 maintenance-by-PA. Needed because an NS-side clean to PoC does not
- * evict a *secure*-tagged L2 line for the same address, and the secure read
- * path can keep hitting that stale line. Op completes when bit 0 clears. */
-#define PL310_CLEAN_INV_PA_SVA  0x1A0027F0u
 
 /* Sized for a full SPLx_TZS_PRINTTBR(1) secure page-table dump (both TTBRs,
  * L1 sections plus their L2 pages) on top of the ordinary boot log. */
@@ -618,15 +614,15 @@ static void probe_ddr_firewall(void)
 }
 
 /*
- * Offset into SYSMEM's .text of the stub slot, inside the unreferenced 0xB6
- * fill at the tail of its last page. Boot 12 measured the live/fill boundary
- * on retail 3.60 at .text+0x140FC (3844 bytes of fill to the page end), so
- * +0x14200 sits 0x104 bytes inside the fill, 32-byte aligned (one cache
- * line for a 16-byte stub), with ~3.5 KiB of slack after it. The 3.65 devkit's
- * boundary was +0x140CC, which is why this is checked at runtime rather than
- * trusted: the fill contents are re-verified immediately before writing.
+ * Cores whose ACTLR came back with both prefetch bits set. Counted so the
+ * per-core loop ends in an explicit result line: on boot 25 the worker
+ * threads logged nothing at all and the pass looked successful from the
+ * surrounding lines alone, which is exactly the failure mode a summary
+ * catches.
  */
-#define SYSMEM_STUB_OFF 0x14200u
+static int g_actlr_ok;
+
+#define ACTLR_PREFETCH_BITS 0x6u   /* [1] = L1 prefetch, [2] = L2 (stride) */
 
 static int run_actlr_core(SceSize args, void *argp)
 {
@@ -634,6 +630,7 @@ static int run_actlr_core(SceSize args, void *argp)
     unsigned int stub_sva  = *(unsigned int *)argp;
     unsigned int stack_sva = *((unsigned int *)argp + 1);
 
+    log_hex_line("  thread entered, stub ", stub_sva);
     unsigned int before = 0, after = 0, mpidr = 0;
     __asm__ __volatile__("mrc p15, 0, %0, c1, c0, 1" : "=r"(before));
     int r = splCl_smc(0, stack_sva, stub_sva, 0, SPLTZ_SMC_EXEC_WITH_SP);
@@ -644,37 +641,43 @@ static int run_actlr_core(SceSize args, void *argp)
     log_hex_line("  actlr before ", before);
     log_hex_line("  actlr after  ", after);
     log_hex_line("  smc ret      ", (unsigned int)r);
+    if ((after & ACTLR_PREFETCH_BITS) == ACTLR_PREFETCH_BITS) g_actlr_ok++;
     return 0;
 }
 
 /*
  * The non-secure view of the TZ region. Boot 17 established that NS *reads*
  * of TZ memory work and only writes are firewalled, so the secure page tables
- * can be walked from non-secure code with no SMC at all. Derived at runtime:
- * both the secure module bases and psp2spl's NS window move between boots.
+ * can be walked from non-secure code with no SMC at all.
+ *
+ * Everything here is read out of psp2spl's own resolved layout rather than
+ * hardcoded: the region base/length and the two TTBR offsets are per-firmware
+ * constants splib already carries, and mbase (its NS window over the region)
+ * is freshly allocated each boot. See src/spl_layout.c.
  */
-#define TZ_RST            0x40000000u
-#define TZ_LEN            0x00200000u
-#define SECURE_TTBR0_OFF  0x00108000u  /* psp2spl tzs_offsets.c statics */
-#define SECURE_TTBR1_OFF  0x0010C000u
+extern unsigned int pfe_tz_layout(unsigned int *rst, unsigned int *len,
+                                  unsigned int *ttbr0_off, unsigned int *ttbr1_off);
 
-static unsigned int g_tz_ns_base;      /* NS VA corresponding to PA 0x40000000 */
+static unsigned int g_tz_ns_base;    /* NS VA corresponding to PA g_tz_rst */
+static unsigned int g_tz_rst;        /* TZ region physical base */
+static unsigned int g_tz_len;        /* TZ region length */
+static unsigned int g_ttbr_off[2];   /* secure TTBR0/TTBR1 offsets into it */
 
-static int tz_ns_init(unsigned int ref_sva)
+static int tz_ns_init(void)
 {
-    unsigned int pa = 0;
-    void *nsva = NULL;
-    if (SPLx_TZS_SVA2PA(ref_sva, &pa) < 0) return -1;
-    if (SPLx_TZS_SVA2NSVA(ref_sva, &nsva) < 0) return -2;
-    if (pa < TZ_RST || pa >= TZ_RST + TZ_LEN) return -3;
-    g_tz_ns_base = (unsigned int)nsva - (pa - TZ_RST);
+    unsigned int mbase = pfe_tz_layout(&g_tz_rst, &g_tz_len,
+                                       &g_ttbr_off[0], &g_ttbr_off[1]);
+    if (!mbase || !g_tz_len) return -1;
+    if (!g_ttbr_off[0] || g_ttbr_off[0] >= g_tz_len) return -2;
+    if (!g_ttbr_off[1] || g_ttbr_off[1] >= g_tz_len) return -3;
+    g_tz_ns_base = mbase;
     return 0;
 }
 
 static unsigned int tz_ns(unsigned int pa)
 {
-    if (!g_tz_ns_base || pa < TZ_RST || pa >= TZ_RST + TZ_LEN) return 0;
-    return g_tz_ns_base + (pa - TZ_RST);
+    if (!g_tz_ns_base || pa < g_tz_rst || pa >= g_tz_rst + g_tz_len) return 0;
+    return g_tz_ns_base + (pa - g_tz_rst);
 }
 
 /*
@@ -684,9 +687,8 @@ static unsigned int tz_ns(unsigned int pa)
  */
 static int ns_walk(unsigned int sva, unsigned int *out_desc_pa, unsigned int *out_desc)
 {
-    static const unsigned int ttbr_off[2] = { SECURE_TTBR0_OFF, SECURE_TTBR1_OFF };
     for (int t = 0; t < 2; t++) {
-        unsigned int l1 = tz_ns(TZ_RST + ttbr_off[t]);
+        unsigned int l1 = tz_ns(g_tz_rst + g_ttbr_off[t]);
         if (!l1) continue;
         unsigned int l1d = ((volatile unsigned int *)l1)[sva >> 20];
         if ((l1d & 3u) != 1u) continue;             /* want a coarse page table */
@@ -711,12 +713,6 @@ static int ns_walk(unsigned int sva, unsigned int *out_desc_pa, unsigned int *ou
  */
 #define DESC_NC_RWX(pa)  (((pa) & 0xFFFFF000u) | 0x52u)
 
-/* Scratch physical page for the stub. Must be inside the TZ region, because
- * the DDR firewall confines secure DRAM access to it. 0x401E3000 sits in a
- * gap between two mapped secure pages (0x401E2000 / 0x401E4000), so it is
- * real secure-accessible DRAM that nothing maps. Re-verified at runtime. */
-#define TZ_SCRATCH_PA    0x401E3000u
-
 /*
  * Is any secure mapping, in either TTBR, backed by this physical page? Used
  * to confirm the scratch page really is free before we write to it - getting
@@ -725,10 +721,9 @@ static int ns_walk(unsigned int sva, unsigned int *out_desc_pa, unsigned int *ou
  */
 static int tz_pa_is_mapped(unsigned int pa)
 {
-    static const unsigned int ttbr_off[2] = { SECURE_TTBR0_OFF, SECURE_TTBR1_OFF };
     unsigned int page = pa & 0xFFFFF000u;
     for (int t = 0; t < 2; t++) {
-        unsigned int l1 = tz_ns(TZ_RST + ttbr_off[t]);
+        unsigned int l1 = tz_ns(g_tz_rst + g_ttbr_off[t]);
         if (!l1) continue;
         for (unsigned int i = 0; i < 4096u; i++) {
             unsigned int l1d = ((volatile unsigned int *)l1)[i];
@@ -754,6 +749,88 @@ static int tz_pa_is_mapped(unsigned int pa)
                 }
             }
         }
+    }
+    return 0;
+}
+
+/*
+ * Picking the scratch page at runtime.
+ *
+ * The stub's bytes have to sit at a physical address inside the TZ region
+ * (boot 20: the DDR firewall confines secure DRAM access to it in both
+ * directions), at a page nothing secure maps. Boot 21 used a hand-picked
+ * 0x401E3000, found by eye in a PRINTTBR dump; this derives the equivalent
+ * from the live tables instead, so the choice follows whatever layout the
+ * running firmware and model actually have.
+ *
+ * One pass over both TTBRs builds a bitmap of every TZ page that is in use -
+ * mapped by a descriptor, or holding one of the page tables themselves - and
+ * the page is then chosen from the holes in it. Requiring both neighbours to
+ * be in use is what makes a hole a gap inside live secure DRAM rather than
+ * address space that was simply never populated; the search runs downwards
+ * because the layouts seen so far keep their code low and their slack high.
+ */
+#define TZ_MAX_PAGES 2048u                      /* a TZ region of up to 8 MiB */
+static unsigned char g_tz_inuse[TZ_MAX_PAGES / 8];
+
+static void tz_mark(unsigned int pa, unsigned int span)
+{
+    if (pa + span <= g_tz_rst || pa >= g_tz_rst + g_tz_len) return;  /* outside */
+    unsigned int lo = (pa > g_tz_rst) ? pa : g_tz_rst;
+    unsigned int hi = pa + span;
+    if (hi > g_tz_rst + g_tz_len) hi = g_tz_rst + g_tz_len;
+    for (unsigned int a = lo & 0xFFFFF000u; a < hi; a += 0x1000u) {
+        unsigned int p = (a - g_tz_rst) >> 12;
+        if (p < TZ_MAX_PAGES) g_tz_inuse[p >> 3] |= (unsigned char)(1u << (p & 7u));
+    }
+}
+
+static int tz_inuse(unsigned int p)
+{
+    return (g_tz_inuse[p >> 3] >> (p & 7u)) & 1u;
+}
+
+static unsigned int tz_find_scratch_pa(void)
+{
+    unsigned int npages = g_tz_len >> 12;
+    if (npages < 3u || npages > TZ_MAX_PAGES) return 0;
+    memset(g_tz_inuse, 0, sizeof(g_tz_inuse));
+
+    for (int t = 0; t < 2; t++) {
+        unsigned int l1 = tz_ns(g_tz_rst + g_ttbr_off[t]);
+        if (!l1) continue;
+        tz_mark(g_tz_rst + g_ttbr_off[t], 0x4000u);   /* the L1 table itself */
+        for (unsigned int i = 0; i < 4096u; i++) {
+            unsigned int l1d = ((volatile unsigned int *)l1)[i];
+            unsigned int type = l1d & 3u;
+            if (type == 2u) {
+                if (l1d & (1u << 18))
+                    tz_mark(l1d & 0xFF000000u, 0x1000000u);   /* supersection */
+                else
+                    tz_mark(l1d & 0xFFF00000u, 0x100000u);    /* section */
+            } else if (type == 1u) {
+                unsigned int l2_pa = l1d & 0xFFFFFC00u;
+                tz_mark(l2_pa, 0x400u);                       /* the L2 table itself */
+                unsigned int l2 = tz_ns(l2_pa);
+                if (!l2) continue;
+                for (unsigned int j = 0; j < 256u; j++) {
+                    unsigned int d = ((volatile unsigned int *)l2)[j];
+                    unsigned int dt = d & 3u;
+                    if (dt == 1u)
+                        tz_mark(d & 0xFFFF0000u, 0x10000u);   /* large page */
+                    else if (dt >= 2u)
+                        tz_mark(d & 0xFFFFF000u, 0x1000u);    /* small page: bit1
+                                                                 set, bit0 is XN,
+                                                                 so 2 *and* 3 */
+                }
+            }
+        }
+    }
+
+    for (unsigned int p = npages - 2u; p >= 1u; p--) {
+        if (tz_inuse(p)) continue;
+        if (!tz_inuse(p - 1u) || !tz_inuse(p + 1u)) continue;
+        return g_tz_rst + (p << 12);
     }
     return 0;
 }
@@ -789,10 +866,14 @@ static void apply_l1_actlr(void)
         log_line("l1: GETMODSVA(SYSMEM,.text) failed");
         return;
     }
-    if (tz_ns_init(text_sva) < 0) {
-        log_line("l1: could not derive the NS view of the TZ region");
+    if (tz_ns_init() < 0) {
+        log_line("l1: psp2spl has no resolved TZ layout - aborting");
         return;
     }
+    log_hex_line("l1 tz rst  ", g_tz_rst);
+    log_hex_line("l1 tz len  ", g_tz_len);
+    log_hex_line("l1 ttbr0 off ", g_ttbr_off[0]);
+    log_hex_line("l1 ttbr1 off ", g_ttbr_off[1]);
     log_hex_line("l1 tz ns base ", g_tz_ns_base);
 
     /*
@@ -804,11 +885,18 @@ static void apply_l1_actlr(void)
      * to the TZ region in both directions, and staging the stub in our own
      * memory cannot work however the caches are maintained.
      */
-    if (tz_pa_is_mapped(TZ_SCRATCH_PA)) {
-        log_line("l1: scratch PA is already mapped by secure world - aborting");
+    unsigned int scratch_pa = tz_find_scratch_pa();
+    if (!scratch_pa) {
+        log_line("l1: found no unmapped TZ page between mapped ones - aborting");
         return;
     }
-    log_hex_line("l1 scratch pa (verified unmapped) ", TZ_SCRATCH_PA);
+    log_hex_line("l1 scratch pa ", scratch_pa);
+    /* Independent cross-check of the bitmap scan, by the descriptor walk. */
+    if (tz_pa_is_mapped(scratch_pa)) {
+        log_line("l1: scratch PA is mapped after all - aborting");
+        return;
+    }
+    log_line("l1: scratch page verified unmapped");
 
     /* Attribute template: SYSMEM .text's last page is secure R-X. Read only to
      * cross-check that our table walk agrees with psp2spl's own SVA2PA. */
@@ -825,26 +913,45 @@ static void apply_l1_actlr(void)
     }
     log_hex_line("l1 rx template desc ", rx_desc);
 
-    /* First unmapped slot past .text, within the same 1 MiB L2 table. */
+    /*
+     * An unmapped slot to hang the new descriptor off. It only has to be a
+     * secure VA whose L2 entry is currently zero; sweep the whole 1 MiB that
+     * holds SYSMEM .text, since how much of it the module occupies varies
+     * between boots (boot 24 had every slot in the 0x15000-0x1F000 window
+     * that worked on boot 21 taken), then any other coarse table in the low
+     * 16 MiB if that one is full.
+     */
     unsigned int target_sva = 0, tgt_desc_pa = 0, tgt_desc = 0;
-    for (unsigned int off = 0x15000u; off <= 0x1F000u; off += 0x1000u) {
+    for (unsigned int off = 0; off < 0x100000u; off += 0x1000u) {
+        unsigned int cand = (text_sva & 0xFFF00000u) + off;
         unsigned int dpa = 0, d = 0;
-        if (ns_walk(text_sva + off, &dpa, &d) < 0) continue;
+        if (!cand) continue;
+        if (ns_walk(cand, &dpa, &d) < 0) continue;
         if (d != 0) continue;
-        target_sva = text_sva + off; tgt_desc_pa = dpa; tgt_desc = d;
+        target_sva = cand; tgt_desc_pa = dpa; tgt_desc = d;
+        break;
+    }
+    for (unsigned int cand = 0x1000u; !target_sva && cand < 0x01000000u; cand += 0x1000u) {
+        unsigned int dpa = 0, d = 0;
+        if (ns_walk(cand, &dpa, &d) < 0) continue;
+        if (d != 0) continue;
+        target_sva = cand; tgt_desc_pa = dpa; tgt_desc = d;
         break;
     }
     if (!target_sva) {
-        log_line("l1: no free slot in SYSMEM's L2 table - aborting");
+        log_line("l1: no free slot in any secure L2 table - aborting");
         return;
     }
     log_hex_line("l1 target sva ", target_sva);
     log_hex_line("l1 target desc pa ", tgt_desc_pa);
 
     /* The descriptor must be written with a *secure* write, so find a secure
-     * VA that maps the L2 table's page and is PL1-RW. */
+     * VA that maps the L2 table's page and is PL1-RW. The secure modules sit
+     * low in the address space, but not always within the first 2 MiB -
+     * SYSMEM .text has been seen at 0x546000 - so sweep 16 MiB. Each probe is
+     * two L1 reads through the NS window, so the wider sweep costs little. */
     unsigned int desc_sva = 0;
-    for (unsigned int cand = 0x1000u; cand < 0x00200000u; cand += 0x1000u) {
+    for (unsigned int cand = 0x1000u; cand < 0x01000000u; cand += 0x1000u) {
         if (cand >= text_sva && cand < text_sva + 0x20000u) continue;
         unsigned int dpa = 0, d = 0;
         if (ns_walk(cand, &dpa, &d) < 0) continue;
@@ -873,7 +980,7 @@ static void apply_l1_actlr(void)
      * no cp15 maintenance is needed at all. Nothing else maps this page, so no
      * alias can be holding a stale line for it either.
      */
-    unsigned int new_desc = DESC_NC_RWX(TZ_SCRATCH_PA);
+    unsigned int new_desc = DESC_NC_RWX(scratch_pa);
     log_hex_line("l1 new desc ", new_desc);
     int wr = SPLx_TZS_WRITE32(desc_sva, new_desc);
     log_hex_line("l1 desc write ret ", (unsigned int)wr);
@@ -921,11 +1028,20 @@ static void apply_l1_actlr(void)
                 SceUID th = ksceKernelCreateThread("pfe_actlr", run_actlr_core,
                                                    0x10, 0x2000, 0, masks[i], NULL);
                 if (th < 0) { log_hex_line("l1: thread create failed ", (unsigned int)th); continue; }
-                if (ksceKernelStartThread(th, sizeof(argp), argp) >= 0)
+                int st = ksceKernelStartThread(th, sizeof(argp), argp);
+                if (st >= 0)
                     ksceKernelWaitThreadEnd(th, NULL, NULL);
+                else
+                    log_hex_line("l1: thread start failed ", (unsigned int)st);
                 ksceKernelDeleteThread(th);
                 flush_log_to_disk();
             }
+            log_hex_line("l1 cores with prefetch bits set, of 4: ",
+                         (unsigned int)g_actlr_ok);
+            if (g_actlr_ok == 4)
+                log_line("l1_prefetch: ACTLR stride prefetch ENABLED on all cores");
+            else
+                log_line("l1_prefetch: NOT fully enabled - see the per-core lines");
         } else {
             log_line("l1: no INTRMGR .data for scratch sp - not executing");
         }
@@ -995,6 +1111,22 @@ int module_start(SceSize argc, const void *args)
          * flip PREFETCH_CTRL bit 28 with a secure read-modify-write. tzs_*32
          * are already exercised successfully during SPLx_TZS_INIT above.
          */
+        /*
+         * PL310_PREFETCH_CTRL_SVA is only valid because the 0x1A000000 MMIO
+         * section is identity-mapped in the secure tables. That has held on
+         * every layout seen so far, but it is an assumption about the
+         * firmware's own page tables, so check it: if the VA resolves to a
+         * different PA, or to nothing, a blind secure write would land
+         * somewhere unknown. Abort instead.
+         */
+        unsigned int pl310_pa = 0;
+        int pr = SPLx_TZS_SVA2PA(PL310_PREFETCH_CTRL_SVA, &pl310_pa);
+        log_hex_line("l2 prefetch_ctrl sva->pa ", pl310_pa);
+        if (pr < 0 || pl310_pa != PL310_PREFETCH_CTRL_SVA) {
+            log_line("l2_prefetch: PREFETCH_CTRL is not identity-mapped - aborting L2");
+            goto l2_done;
+        }
+
         unsigned int before = 0;
         int rr = SPLx_TZS_READ32(PL310_PREFETCH_CTRL_SVA, &before);
         log_hex_line("l2 read32 ret ", (unsigned int)rr);
@@ -1013,6 +1145,7 @@ int module_start(SceSize argc, const void *args)
             else
                 log_line("l2_prefetch: bit did not stick (write ignored?)");
         }
+    l2_done:
         flush_log_to_disk();
     }
 

@@ -33,6 +33,17 @@ build output keeps this repo's own Docker build self-contained. Rebuilding
 with the patch applied requires that same toolchain; the patch file is
 included so the exact change is reviewable and reproducible without it.
 
+`include/hardware/` holds four headers (`types.h`, `paddr.h`, `maika.h`,
+`xbar.h`) copied verbatim from [SKGleba/psp2ref](https://github.com/SKGleba/psp2ref),
+which upstream splib consumes through a sibling checkout rather than
+bundling. They are needed because `libspl-int.h` — splib's internal header,
+and the only place `struct tzs_layout_s` and the `spl_root` global are
+declared — includes them. `src/spl_layout.c` reads the secure-world layout
+psp2spl already resolved (TZ region base/length, both secure TTBR offsets,
+and its non-secure window over the region) out of that global, instead of
+this plugin duplicating the same per-firmware constants. psp2ref is MIT;
+its licence is at `include/hardware/LICENSE.psp2ref.txt`.
+
 Licensed MIT — `LICENSE.txt` in this directory is copied verbatim from
 upstream. If you'd rather build splib yourself from source, see upstream's
 own repo for instructions; point `PSP2SPL_DIR` at your own build output

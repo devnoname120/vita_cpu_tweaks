@@ -14,28 +14,39 @@ l2_prefetch=off
 
 ## ⚠️ Compatibility — read before flashing this
 
-**The current code has not run on any hardware yet.** The underlying
-register-level technique — setting ACTLR/PL310 bits via
-[psp2spl](https://github.com/SKGleba/psp2spl)'s `EXEC_WITH_SP` secure-call
-gadget — was devkit-verified at firmware 3.65 (see "Why bother" below), but
-as of 2026-11-24 the *delivery* mechanism changed: instead of injecting a
-stub into an unreferenced padding region inside a different module
-(SYSMEM), it now maps a second, execute-only alias of our own module's own
-physical memory and jumps straight into that (see "How it works" below).
-That removes the one thing that was firmware/build-specific about the old
-approach — SYSMEM's internal padding offset — but it's a different
-mechanism and hasn't been tried on real hardware at all yet. Next test is
-a retail unit on firmware 3.60 via enso.
+**Verified on exactly one configuration: a retail PS Vita on firmware 3.60
+via enso** (2026-11-24). Both prefetchers come on there — ACTLR
+`0x149 -> 0x14F` on all four cores, PL310 `PREFETCH_CTRL`
+`0x21000000 -> 0x31000000` — reproduced across several consecutive boots.
+Nothing else has been tried: no other retail firmware, and no devkit,
+testkit or debug unit. The underlying register-level technique was
+separately devkit-verified at firmware 3.65 (see "Why bother" below), but
+by a *different* delivery mechanism that turned out not to port to retail;
+see `analysis/ebadmovp-investigation/README.md` for what this does instead
+and why.
 
-One thing still gates whether this works at all on a given unit/firmware:
+Two things gate whether it works at all on a given unit/firmware:
 
 1. **psp2spl's own firmware range.** Its secure-world init is gated to
    firmware `3.60`–`3.74`. Outside that range it won't even get as far as
-   trying.
+   trying. This is the hard ceiling: a 3.65 or 3.74 unit is plausible, a
+   3.75+ unit is not.
+2. **The secure-world layout.** No address is hardcoded — the TZ region
+   bounds and secure page-table roots are read out of psp2spl's own
+   resolved layout, and the scratch page, stub slot and page-table write
+   window are each found by walking the live secure tables at runtime. They
+   have to be: they move between boots on a *single* unit, let alone between
+   firmwares. Every step is gated, so a layout this doesn't fit aborts with
+   a logged reason instead of doing something unpredictable.
 
-Go cautiously until that's confirmed on more than one unit/firmware: start
-with both config keys `off`, confirm the plugin loads and exits cleanly,
-*then* flip one on and watch a USB/UART console on the first boot after.
+Go cautiously on any configuration other than retail 3.60: start with both
+config keys `off`, confirm the plugin loads and exits cleanly, *then* flip
+one on and read `ur0:data/prefetch_enabler.log` after the next boot.
+
+Note also that the dead-man's switch (below) comments out the plugin's own
+`config.txt` line on every boot, so as shipped it applies the settings once
+and then disables itself. That is deliberate for testing; using it as a
+permanent enabler means removing that safety net.
 
 This also only re-applies on a **cold boot** — not on resume-from-sleep.
 Whether sleep/resume clears these bits on this hardware was never safely
@@ -114,23 +125,44 @@ one.
 
 ## How it works, briefly
 
-Uses psp2spl to get secure-world (TrustZone) code execution. Each
-prefetcher's stub (`MRC`/`ORR`/`MCR`/`BX` for ACTLR; a PL310 MMIO
-read-modify-write for `PREFETCH_CTRL`) is plain compiled-in data in this
-module — nothing is written at runtime. To run one, the plugin resolves
-the physical address already backing it (`ksceKernelVAtoPA`), maps a
-second, execute-only alias of that same physical page
-(`SCE_KERNEL_MEMBLOCK_TYPE_KERNEL_RX`), and jumps straight into it via
-psp2spl's `EXEC_WITH_SP` secure-call gadget — once per core for ACTLR,
-once for the shared PL310 controller. All of this runs fresh on every
-cold boot, driven by whatever the config file says that boot.
+Uses psp2spl for secure-world (TrustZone) access. The two prefetchers need
+quite different amounts of machinery.
+
+**PL310** is memory-mapped, not a cp15 register, so no code execution is
+needed at all: one secure read-modify-write sets `PREFETCH_CTRL` bit 28.
+The controller is shared, so this happens once.
+
+**ACTLR** is a cp15 register, and only an `MCR` executing in secure PL1 can
+write it — once per core. That needs a `func` pointer that is executable
+under the *secure* page tables, and on retail 3.60 nothing non-secure can
+produce one directly: no secure page is both writable and executable, the
+DDR firewall silently drops non-secure writes aimed into the TrustZone
+region, and it also blocks secure accesses pointed *out* of that region, so
+the module's own memory cannot be used as the stub's home either. What does
+work is to give secure world a new mapping instead of new contents: one
+secure write adds a single L2 descriptor mapping a previously-unmapped
+secure VA to an unused physical page inside the TZ region, as Normal
+Non-Cacheable, PL1-RW and executable. Non-cacheable is load-bearing — it
+removes every cache-maintenance concern, including PL310's
+security-tagged lines — and a VA that was invalid before cannot be holding
+a stale TLB entry. The 4-instruction stub is then written with secure
+writes, read back through the new mapping as a gate, executed per core via
+psp2spl's `EXEC_WITH_SP`, and the scratch page and descriptor are both
+cleaned up afterwards.
+
+All of this runs fresh on every cold boot, driven by whatever the config
+file says that boot, and every address involved is derived from the live
+secure page tables at runtime. The full derivation, including the dead ends
+and how each wall was established, is in
+`analysis/ebadmovp-investigation/README.md`.
 
 ## Credits
 
 None of this would have been possible without **[@SKGleba](https://github.com/SKGleba)**'s
 research into the Vita's lv0/TrustZone internals and the
 **[psp2spl](https://github.com/SKGleba/psp2spl)** library built on top of
-it — the secure-world code execution this plugin relies on entirely. The
-current approach above (executing straight out of this module's own
-memory instead of injecting into another module's) was also his
-suggestion. Huge thanks for publishing both and for the help.
+it — the secure-world access this plugin relies on entirely. His suggestion
+to execute out of our own memory rather than inject into another module's
+is what led to the current mapping-injection approach, after the firewall
+ruled out the literal version of it. Huge thanks for publishing both and
+for the help.

@@ -18,7 +18,7 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,-q -Wall -O2 -nostdlib -fno-tree-vectori
 include_directories(${PSP2SPL_DIR}/include)
 link_directories(${PSP2SPL_DIR}/lib)
 
-add_executable(prefetch_enabler src/main.c)
+add_executable(prefetch_enabler src/main.c src/spl_layout.c)
 target_link_libraries(prefetch_enabler
   splCFK
   spl

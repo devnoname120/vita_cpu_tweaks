@@ -65,6 +65,43 @@ That splits the two knobs:
   anything is written, and every address is derived per boot - SYSMEM's `.text`
   moved between `0x000E0000`, `0x00200000` and `0x00210000` across these tests.
 
+* **Made layout-agnostic (boots 23-29).** Everything the L1 path had
+  hardcoded is now read or derived at runtime, so it follows whatever layout
+  the running firmware and model have rather than retail 3.60's:
+
+  * the TZ region base and length and both secure TTBR offsets come from
+    psp2spl's own resolved `struct tzs_layout_s` (`statics[]` and `mbase`) via
+    `src/spl_layout.c`, instead of being copied out of `tzs_offsets.c`. Boot 23
+    read back `0x40000000 / 0x00200000 / 0x108000 / 0x10C000` and `mbase
+    0x30600000`, which matches splib's own `BA: 40000000[00200000] <=>
+    30600000` log line - an independent confirmation.
+  * the scratch page is found by one pass over both TTBRs that builds a bitmap
+    of every in-use TZ page (mapped by a descriptor, or holding a page table),
+    then takes the highest hole whose neighbours are both in use. On retail
+    3.60 it independently derives `0x401E3000` - the same page that was
+    hand-picked by eye from boot 21's PRINTTBR dump.
+  * the stub's VA slot is any zero L2 entry, swept first across the 1 MiB
+    holding SYSMEM `.text` and then across the low 16 MiB. This matters: how
+    much of that 1 MiB SYSMEM occupies varies per boot. Boot 24 had every slot
+    in the `0x15000-0x1F000` window that worked on boot 21 taken, boots 26-28
+    landed on `0x215000`, boot 25 on `0x225000`, and boot 29 fell through to
+    the 16 MiB sweep. `desc_sva` differed on every single boot.
+  * PL310's `PREFETCH_CTRL` secure VA is gated on `SVA2PA(sva) == sva`, so a
+    build whose MMIO section is not identity-mapped aborts cleanly instead of
+    taking a blind secure write to an unknown address.
+
+  Result on retail 3.60: 4/4 cores `0x149 -> 0x14F` plus PL310
+  `0x21000000 -> 0x31000000` on four consecutive boots (26-29) across three
+  different target slots. Two bugs were caught by the gates rather than by a
+  hang, which is the whole point of them: the bitmap scan first missed small
+  pages encoded `dt == 3` (bit 0 of a small-page descriptor is XN, so an
+  unexecutable page reads as 3, not 2), under-marking most data pages and
+  proposing a page that `tz_pa_is_mapped()` then rejected; and boot 25's worker
+  threads silently did nothing, which the surrounding log lines made look like
+  a success. The per-core loop now ends in an explicit `N/4` result line, and a
+  failed `ksceKernelStartThread` is logged instead of being skipped silently.
+  Boot 25's cause is still unidentified and has not recurred.
+
   The rest of this bullet is the record of how the dead ends were eliminated.
 
 * **L1 / ACTLR - the dead ends, and why the devkit's technique does not port.**
