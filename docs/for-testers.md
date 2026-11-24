@@ -68,11 +68,12 @@ running without that safety net.
    four times, `actlr: requested bits APPLIED on all cores`,
    `prefetch_ctrl before 0x21000000` / `after 0x3100000F` and
    `pl310: requested fields APPLIED`.
-3. **`benchmark = once`**. 30 seconds after boot, it raises the clocks to game
-   levels (CPU 500 MHz), runs a memory benchmark across the prefetch
-   settings for about 40 seconds, puts the firmware's settings and clocks
-   back, and reboots the console. Leave the Vita alone for two minutes
-   until it has rebooted, then send `ur0:data/cpu_tweaks_bench.log`
+3. **`benchmark = once`**. During boot, it raises the clocks to game levels
+   (CPU 500 MHz), runs a memory benchmark across the prefetch settings for
+   about 40 seconds - the screen stays on the boot logo meanwhile - puts
+   the firmware's settings and clocks back, and reboots the console. Leave
+   the Vita alone for two minutes until it is back on the home screen, then
+   send `ur0:data/cpu_tweaks_bench.log`
    - it ends with `bench done`. This tells us whether the speed-up holds on
    your unit too. 500 MHz needs a clock plugin such as PSVshell; without
    one it runs at 444 and says so.
