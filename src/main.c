@@ -19,10 +19,13 @@
  * can't read its own config should do nothing, not guess. Lines starting
  * with '#' (after trimming leading whitespace) are comments and ignored.
  *
- * To disable the plugin itself (no config read, no secure-world touch, no
- * log write), comment out or remove its line in ur0:tai/config.txt - that
- * is ordinary taiHEN usage, nothing custom needed.
+ * Dead-man's switch: every boot, before touching config or secure-world
+ * state, the plugin comments out its OWN line in ur0:tai/config.txt. If
+ * this boot hangs or crashes, a plain power cycle recovers normally - the
+ * next boot's taiHEN never loads it. To run it again, manually uncomment
+ * that line again before rebooting.
  *
+
  * "off" touches NO secure-world state at all - the hardware is already
  * disabled at this point in boot, so there is nothing to clear. Only
  * "on" for either key runs the secure-world stub below.
@@ -62,6 +65,9 @@ void *memset(void *dst, int c, unsigned int n)
 #define CONFIG_PATH "ur0:data/prefetch_enabler.txt"
 #define LOG_PATH    "ur0:data/prefetch_enabler.log"
 #define HOST_LOG    "host0:prefetch_enabler/boot.log"
+
+#define TAI_CONFIG_PATH   "ur0:tai/config.txt"
+#define SELF_SKPRX_NEEDLE "prefetch_enabler.skprx"
 
 /*
  * ACTLR/PL310 set stubs - executed in place, through a fresh execute-only
@@ -271,6 +277,105 @@ static int streq_ci(const char *a, int alen, const char *b)
     return 1;
 }
 
+static int contains_n(const char *hay, int haylen, const char *needle)
+{
+    for (int i = 0; i < haylen; i++) {
+        int j = 0;
+        while (needle[j] && i + j < haylen && hay[i + j] == needle[j]) j++;
+        if (needle[j] == '\0') return 1;
+    }
+    return 0;
+}
+
+/*
+ * Dead-man's switch: comments out this plugin's own line(s) in
+ * ur0:tai/config.txt before module_start() does anything else. taiHEN only
+ * reads config.txt once, at boot, before loading us - editing it now can't
+ * affect the boot in progress, only the next one. So if this boot's later
+ * secure-world work hangs or crashes, a plain power cycle then skips
+ * loading us entirely: no SD2VITA / manual file edit needed to recover.
+ * Re-enabling after a clean boot means manually uncommenting the line.
+ *
+ * Gating, not best-effort: if we can't *confirm* the switch is set, the
+ * caller must skip the risky work for this boot too, rather than silently
+ * running it with no net. stat-then-read (instead of just capping the
+ * read) is what lets us tell "file fits" apart from "file truncated by our
+ * own buffer" - writing back a truncated read would destroy the rest of
+ * the user's real config.txt.
+ */
+static int self_disable_in_config(const char **reason)
+{
+    SceIoStat st;
+    memset(&st, 0, sizeof(st));
+    if (ksceIoGetstat(TAI_CONFIG_PATH, &st) < 0) {
+        *reason = "stat failed";
+        return 0;
+    }
+
+    static char cfg[16384];
+    if (st.st_size < 0 || st.st_size > (SceOff)sizeof(cfg) - 1) {
+        *reason = "config.txt too large for buffer";
+        return 0;
+    }
+
+    SceUID fd = ksceIoOpen(TAI_CONFIG_PATH, SCE_O_RDONLY, 0);
+    if (fd < 0) {
+        *reason = "open(r) failed";
+        return 0;
+    }
+    int n = ksceIoRead(fd, cfg, sizeof(cfg) - 1);
+    ksceIoClose(fd);
+    if (n <= 0) {
+        *reason = "read failed/empty";
+        return 0;
+    }
+
+    int found = 0;
+    int pos = 0;
+    while (pos < n) {
+        int start = pos;
+        while (pos < n && cfg[pos] != '\n') pos++;
+        int line_end = pos;
+
+        const char *tl = cfg + start;
+        int tlen = line_end - start;
+        trim(&tl, &tlen);
+
+        if (tlen > 0 && tl[0] != '#' && contains_n(tl, tlen, SELF_SKPRX_NEEDLE)) {
+            if (n >= (int)sizeof(cfg) - 1) {
+                *reason = "no room to insert '#'";
+                return 0;
+            }
+            for (int i = n; i > start; i--) cfg[i] = cfg[i - 1];
+            cfg[start] = '#';
+            n++;
+            pos++; /* re-sync: this line's '\n'/EOF just shifted right by 1 */
+            found = 1;
+        }
+        pos++; /* skip the '\n' itself (or step past EOF on the last line) */
+    }
+
+    if (!found) {
+        *reason = "own line not found";
+        return 0;
+    }
+
+    fd = ksceIoOpen(TAI_CONFIG_PATH, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
+    if (fd < 0) {
+        *reason = "open(w) failed";
+        return 0;
+    }
+    int w = ksceIoWrite(fd, cfg, (SceSize)n);
+    ksceIoClose(fd);
+    if (w != n) {
+        *reason = "short write";
+        return 0;
+    }
+
+    *reason = "ok";
+    return 1;
+}
+
 /* Reads CONFIG_PATH and decides which sites to enable. Any failure to open
  * the file, or any line that isn't a recognized "key=value", leaves that
  * key's flag at its "off" default. */
@@ -355,8 +460,19 @@ static int run_actlr_core(SceSize args, void *argp)
 int module_start(SceSize argc, const void *args)
 {
     (void)argc; (void)args;
+
+    const char *disable_reason = "";
+    int disabled = self_disable_in_config(&disable_reason);
+
     g_log_len = 0;
     log_line("==== vita_prefetch_enabler boot start ====");
+    if (disabled) {
+        log_line("selfdisable: own config.txt line commented out for next boot");
+    } else {
+        log_line("selfdisable: FAILED - aborting before any secure-world work");
+        log_line(disable_reason);
+        goto write_out;
+    }
 
     int want_l1 = 0, want_l2 = 0;
     read_config(&want_l1, &want_l2);
