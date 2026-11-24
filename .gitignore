@@ -11,6 +11,5 @@ analysis/**/*.i64
 # verification scratch: extracted objects/tables from psp2spl build output
 analysis/**/psp2spl_objs/
 
-# dist/: handout text is tracked; the built skprx and the zip are not
-dist/**/*.skprx
-dist/*.zip
+# dist/ is already ignored globally: it holds only generated handout
+# artifacts. The tracked inputs are docs/for-testers*.
