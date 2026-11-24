@@ -9,7 +9,7 @@
 set -e
 cd "$(dirname "$0")/.."
 
-skprx=build/prefetch_enabler.skprx
+skprx=build/cpu_tweaks.skprx
 [ -f "$skprx" ] || { echo "no $skprx -- build first" >&2; exit 1; }
 
 commit=$(git rev-parse --short HEAD)
@@ -20,13 +20,13 @@ sum=$(shasum -a 256 "$skprx" | cut -d' ' -f1)
 stage=dist/for-testing
 rm -rf "$stage"
 mkdir -p "$stage"
-cp "$skprx" "$stage/prefetch_enabler.skprx"
-cp docs/for-testers.config.ini "$stage/prefetch_enabler.ini"
+cp "$skprx" "$stage/cpu_tweaks.skprx"
+cp docs/for-testers.config.ini "$stage/cpu_tweaks.ini"
 sed -e "s/^build:  .*/build:   $commit/" \
     -e "s/^sha256: .*/sha256:  $sum/" \
     docs/for-testers.md > "$stage/README-FOR-TESTERS.md"
 
-out="dist/prefetch_enabler-test-$commit.zip"
+out="dist/cpu_tweaks-test-$commit.zip"
 rm -f "$out"
 (cd dist && zip -q -r "../$out" for-testing)
 echo "$out"

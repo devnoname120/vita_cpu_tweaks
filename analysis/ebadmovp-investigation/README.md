@@ -1,5 +1,11 @@
 # SPL_TZSGMSV_EBADMOVP on retail 3.60 (enso)
 
+> **Renamed (2026-11-24):** the project is now `vita_cpu_tweaks`: the plugin is
+> `cpu_tweaks.skprx`, its config `ur0:data/cpu_tweaks.ini`, its logs
+> `ur0:data/cpu_tweaks.log` and `cpu_tweaks_bench.log`. Entries below keep
+> the names in use at the time (`prefetch_enabler.*`).
+
+
 Investigation into why `SPLx_CFK_INIT()` fails with `SPL_TZSGMSV_EBADMOVP`
 (-36) during `SPLx_TZS_INIT`'s own eager resolution of SYSMEM (module 1),
 on the retail PCH-1000 test unit, firmware 3.60 via enso.

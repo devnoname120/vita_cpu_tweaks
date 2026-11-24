@@ -1,4 +1,4 @@
-# vita_prefetch_enabler — test build
+# vita_cpu_tweaks — test build
 
 Re-enables the PS Vita's Cortex-A9 (ACTLR) and PL310 hardware data
 prefetchers, which Sony's `kernel_boot_loader` turns off at every boot.
@@ -39,16 +39,16 @@ than running without that safety net.
 
 ## Install
 
-1. Copy `prefetch_enabler.skprx` to `ur0:tai/`. Keep the filename — the
-   self-disable looks for a line containing `prefetch_enabler.skprx`.
-2. Copy `prefetch_enabler.ini` to `ur0:data/`. It's INI-style so editors
+1. Copy `cpu_tweaks.skprx` to `ur0:tai/`. Keep the filename — the
+   self-disable looks for a line containing `cpu_tweaks.skprx`.
+2. Copy `cpu_tweaks.ini` to `ur0:data/`. It's INI-style so editors
    highlight it. Editing it on Windows is fine — LF, CRLF and bare CR line
    endings all work, and a UTF-8 BOM is ignored.
 3. Add to `ur0:tai/config.txt`, under the `*KERNEL` section:
 
    ```
    *KERNEL
-   ur0:tai/prefetch_enabler.skprx
+   ur0:tai/cpu_tweaks.skprx
    ```
 
    It must be `ur0:tai/config.txt` specifically — that's the only path the
@@ -57,8 +57,8 @@ than running without that safety net.
 
 ## Please go up this ladder, one reboot at a time
 
-`ur0:data/prefetch_enabler.ini` ships set to step 1. After each boot, read
-`ur0:data/prefetch_enabler.log`, then re-enable the config.txt line, change
+`ur0:data/cpu_tweaks.ini` ships set to step 1. After each boot, read
+`ur0:data/cpu_tweaks.log`, then re-enable the config.txt line, change
 the config as below, and reboot for the next step.
 
 1. **`probe = on`, `enable = off`** (as shipped). Read-only: dumps your secure page-table
@@ -77,7 +77,7 @@ the config as below, and reboot for the next step.
    levels (CPU 500 MHz), runs a memory benchmark across the prefetch
    settings for about 40 seconds, puts the firmware's settings and clocks
    back, and reboots the console. Leave the Vita alone for two minutes
-   until it has rebooted, then send `ur0:data/prefetch_enabler_bench.log`
+   until it has rebooted, then send `ur0:data/cpu_tweaks_bench.log`
    - it ends with `bench done`. This tells us whether the speed-up holds on
    your unit too. 500 MHz needs a clock plugin such as PSVshell; without
    one it runs at 444 and says so.
@@ -88,7 +88,7 @@ a useful result, not a failure — please send the log either way.
 
 ## What to send back
 
-`ur0:data/prefetch_enabler.log`, plus your **firmware version** and **model**
+`ur0:data/cpu_tweaks.log`, plus your **firmware version** and **model**
 (retail / devkit / testkit / debug, and PCH-1000 vs PCH-2000). The log is
 plain text and contains no personal data.
 
@@ -113,4 +113,4 @@ Lines worth a quick look yourself:
   GPU-bound or pointer-chasing workload.
 
 Source, full technical writeup and the record of every dead end:
-<https://github.com/devnoname120/vita_prefetch_enabler>
+<https://github.com/devnoname120/vita_cpu_tweaks>

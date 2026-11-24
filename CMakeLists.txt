@@ -6,7 +6,7 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
     message(FATAL_ERROR "Please define VITASDK")
   endif()
 endif()
-project(prefetch_enabler C)
+project(cpu_tweaks C)
 include("${VITASDK}/share/vita.cmake" REQUIRED)
 
 # Vendored by default (include/ + prebuilt lib/*.a) - see third_party/psp2spl/NOTICE.md.
@@ -18,8 +18,8 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,-q -Wall -O2 -nostdlib -fno-tree-vectori
 include_directories(${PSP2SPL_DIR}/include)
 link_directories(${PSP2SPL_DIR}/lib)
 
-add_executable(prefetch_enabler src/main.c src/spl_layout.c src/config.c src/bench.c)
-target_link_libraries(prefetch_enabler
+add_executable(cpu_tweaks src/main.c src/spl_layout.c src/config.c src/bench.c)
+target_link_libraries(cpu_tweaks
   splCFK
   spl
   SceSblSmSchedProxyForKernel_stub
@@ -35,4 +35,4 @@ target_link_libraries(prefetch_enabler
   SceDebugForDriver_stub
   SceDebugForKernel_stub
 )
-vita_create_self(prefetch_enabler.skprx prefetch_enabler CONFIG ${CMAKE_SOURCE_DIR}/prefetch_enabler.yml UNSAFE)
+vita_create_self(cpu_tweaks.skprx cpu_tweaks CONFIG ${CMAKE_SOURCE_DIR}/cpu_tweaks.yml UNSAFE)

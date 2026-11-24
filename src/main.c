@@ -1,12 +1,12 @@
 /*
- * vita_prefetch_enabler - enable the Cortex-A9 / PL310 hardware prefetchers
+ * vita_cpu_tweaks - enable the Cortex-A9 / PL310 hardware prefetchers
  * on a PS Vita, from a config.txt-loaded taiHEN kernel plugin.
  *
  * The Vita's kernel_boot_loader explicitly disables both hardware
  * prefetchers at boot. This plugin re-enables either or both, every cold
  * boot, controlled by a plain text config file:
  *
- *     ur0:data/prefetch_enabler.ini
+ *     ur0:data/cpu_tweaks.ini
  *
  *     # l1_prefetch: Cortex-A9 ACTLR L1 D-side prefetch + L2 prefetch hint (bits 2:1)
  *     # l2_prefetch: ARM PL310 L2C-310 data prefetch (PREFETCH_CTRL bit 28) -- on/off
@@ -36,8 +36,8 @@
  * PLEASE READ THE "Compatibility" SECTION THERE BEFORE FLASHING THIS ONTO
  * A UNIT WHOSE FIRMWARE WASN'T ALREADY CONFIRMED.
  *
- * Writes a plain-text log to ur0:data/prefetch_enabler.log every boot, plus
- * a best-effort copy to host0:prefetch_enabler/boot.log when a DECI4p host
+ * Writes a plain-text log to ur0:data/cpu_tweaks.log every boot, plus
+ * a best-effort copy to host0:cpu_tweaks/boot.log when a DECI4p host
  * happens to be attached (debugging convenience only).
  */
 #include <psp2kern/kernel/modulemgr.h>
@@ -56,7 +56,7 @@
 #include "config.h"
 #include "bench.h"
 
-#define LOG(...) ksceDebugPrintf("[PFE] " __VA_ARGS__)
+#define LOG(...) ksceDebugPrintf("[CPUT] " __VA_ARGS__)
 
 void *memset(void *dst, int c, unsigned int n)
 {
@@ -65,15 +65,15 @@ void *memset(void *dst, int c, unsigned int n)
     return dst;
 }
 
-#define CONFIG_PATH "ur0:data/prefetch_enabler.ini"
+#define CONFIG_PATH "ur0:data/cpu_tweaks.ini"
 /* A bench run's own copy of the log. The reboot that ends a bench is followed
  * by a normal boot, which - with self_disable=no - would overwrite LOG_PATH. */
-#define BENCH_LOG_PATH "ur0:data/prefetch_enabler_bench.log"
-#define LOG_PATH    "ur0:data/prefetch_enabler.log"
-#define HOST_LOG    "host0:prefetch_enabler/boot.log"
+#define BENCH_LOG_PATH "ur0:data/cpu_tweaks_bench.log"
+#define LOG_PATH    "ur0:data/cpu_tweaks.log"
+#define HOST_LOG    "host0:cpu_tweaks/boot.log"
 
 #define TAI_CONFIG_PATH   "ur0:tai/config.txt"
-#define SELF_SKPRX_NEEDLE "prefetch_enabler.skprx"
+#define SELF_SKPRX_NEEDLE "cpu_tweaks.skprx"
 
 /*
  * ACTLR/PL310 set stubs - executed in place, through a fresh execute-only
@@ -178,7 +178,7 @@ static void flush_log_to_disk(void)
         ksceIoWrite(fd, g_log, (SceSize)g_log_len);
         ksceIoClose(fd);
     }
-    ksceIoMkdir("host0:prefetch_enabler", 0777);
+    ksceIoMkdir("host0:cpu_tweaks", 0777);
     SceUID hfd = ksceIoOpen(HOST_LOG, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
     if (hfd >= 0) {
         ksceIoWrite(hfd, g_log, (SceSize)g_log_len);
@@ -1570,7 +1570,7 @@ static int bench_main_thread(SceSize args, void *argp)
     ksceKernelDelayThread(BENCH_START_DELAY_US);
     run_bench_suite(g_bench_clocks_max);
     probe_cpu_regs();
-    log_line("==== vita_prefetch_enabler bench done ====");
+    log_line("==== vita_cpu_tweaks bench done ====");
     save_bench_log();
     flush_log_to_disk();
     bench_reboot();
@@ -1582,7 +1582,7 @@ int module_start(SceSize argc, const void *args)
     (void)argc; (void)args;
 
     g_log_len = 0;
-    log_line("==== vita_prefetch_enabler boot start ====");
+    log_line("==== vita_cpu_tweaks boot start ====");
 
     /*
      * The config is read before the dead-man's switch so that
@@ -1634,7 +1634,7 @@ int module_start(SceSize argc, const void *args)
     }
 
     {
-        SPLx_CFK_PREP(NULL, 0, "[PFE]");
+        SPLx_CFK_PREP(NULL, 0, "[CPUT]");
         ksceKernelRegisterKprintfHandler(kprintf_capture_handler, NULL);
         int ret = SPLx_CFK_INIT(SPL_IFL(_LV0) | SPL_IFL(_TZS), 0, 1, 1,
                                  SPLV0_COMMBACKUP_CRITICAL);
@@ -1663,7 +1663,7 @@ int module_start(SceSize argc, const void *args)
         log_line("bench: timing=boot, running now, holding boot");
         run_bench_suite(cfg.bench_clocks_max);
         probe_cpu_regs();
-        log_line("==== vita_prefetch_enabler bench done ====");
+        log_line("==== vita_cpu_tweaks bench done ====");
         save_bench_log();
         flush_log_to_disk();
         bench_reboot();
@@ -1712,7 +1712,7 @@ int module_start(SceSize argc, const void *args)
      */
     probe_cpu_regs();
 
-    log_line("==== vita_prefetch_enabler boot done ====");
+    log_line("==== vita_cpu_tweaks boot done ====");
 
 write_out:
     flush_log_to_disk();

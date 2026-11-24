@@ -18,9 +18,9 @@ import os
 HOST = "192.168.1.146"
 FTP_PORT = 1337
 CMD_PORT = 1338
-NEEDLE = b"ur0:tai/prefetch_enabler.skprx"
+NEEDLE = b"ur0:tai/cpu_tweaks.skprx"
 SKPRX_LOCAL = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
-    os.path.dirname(__file__), "..", "..", "..", "build", "prefetch_enabler.skprx")
+    os.path.dirname(__file__), "..", "..", "..", "build", "cpu_tweaks.skprx")
 
 ftp = ftplib.FTP(timeout=10)
 ftp.connect(HOST, FTP_PORT)
@@ -44,8 +44,8 @@ print("uploaded config.txt, size now:", ftp.size("ur0:tai/config.txt"))
 
 print("--- uploading new skprx ---")
 with open(SKPRX_LOCAL, "rb") as f:
-    ftp.storbinary("STOR ur0:tai/prefetch_enabler.skprx", f)
-print("uploaded skprx, size now:", ftp.size("ur0:tai/prefetch_enabler.skprx"))
+    ftp.storbinary("STOR ur0:tai/cpu_tweaks.skprx", f)
+print("uploaded skprx, size now:", ftp.size("ur0:tai/cpu_tweaks.skprx"))
 
 ftp.quit()
 

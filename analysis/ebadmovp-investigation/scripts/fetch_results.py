@@ -14,7 +14,7 @@ ftp.connect(HOST, PORT)
 ftp.login()
 
 buf = bytearray()
-ftp.retrbinary("RETR ur0:data/prefetch_enabler.log", buf.extend)
+ftp.retrbinary("RETR ur0:data/cpu_tweaks.log", buf.extend)
 with open(LOGOUT, "wb") as f:
     f.write(buf)
 print(f"log: {len(buf)} bytes -> {LOGOUT}")

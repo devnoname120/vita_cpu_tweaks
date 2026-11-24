@@ -20,7 +20,7 @@ Fix: DATAMP=0 for SYSMEM, the same sentinel BUSERR's entry already uses
 for the same reason (no consumer, so no resolution needed). This is a
 single-field change to data nothing internal reads, not a guess at a
 corrected offset - the external caller that *does* want SYSMEM's .data
-(vita_prefetch_enabler, for an EXEC_WITH_SP scratch stack) is being
+(vita_cpu_tweaks, for an EXEC_WITH_SP scratch stack) is being
 changed separately to source its own memory instead, since borrowing a
 live, security-critical module's .data for a transient stack is a risk
 independent of whether the borrowed address is even correct.

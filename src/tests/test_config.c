@@ -50,7 +50,7 @@ static void check_comment(const char *name, const char *in, const char *want,
     int n = (int)strlen(in);
     memcpy(buf, in, (size_t)n);
     int ret = pfe_comment_out_lines(buf, &n, (int)sizeof(buf),
-                                    "prefetch_enabler.skprx");
+                                    "cpu_tweaks.skprx");
     int wn = (int)strlen(want);
     if (ret != want_ret || n != wn || memcmp(buf, want, (size_t)wn) != 0) {
         printf("FAIL %-48s ret=%d (want %d)\n", name, ret, want_ret);
@@ -245,8 +245,8 @@ int main(void)
 
     /* The shipped example file must actually parse, every line recognised. */
     {
-        FILE *f = fopen("prefetch_enabler.example.ini", "rb");
-        if (!f) f = fopen("../prefetch_enabler.example.ini", "rb");
+        FILE *f = fopen("cpu_tweaks.example.ini", "rb");
+        if (!f) f = fopen("../cpu_tweaks.example.ini", "rb");
         if (!f) {
             printf("FAIL %-48s cannot open example config\n", "example file");
             failures++;
@@ -294,42 +294,44 @@ int main(void)
 
     /* --- dead-man's switch --- */
     check_comment("switch: LF",
-                  "*KERNEL\nur0:tai/prefetch_enabler.skprx\n",
-                  "*KERNEL\n#ur0:tai/prefetch_enabler.skprx\n", 1);
+                  "*KERNEL\nur0:tai/cpu_tweaks.skprx\n",
+                  "*KERNEL\n#ur0:tai/cpu_tweaks.skprx\n", 1);
     check_comment("switch: CRLF preserved",
-                  "*KERNEL\r\nur0:tai/prefetch_enabler.skprx\r\n",
-                  "*KERNEL\r\n#ur0:tai/prefetch_enabler.skprx\r\n", 1);
+                  "*KERNEL\r\nur0:tai/cpu_tweaks.skprx\r\n",
+                  "*KERNEL\r\n#ur0:tai/cpu_tweaks.skprx\r\n", 1);
     check_comment("switch: bare CR",
-                  "*KERNEL\rur0:tai/prefetch_enabler.skprx\r",
-                  "*KERNEL\r#ur0:tai/prefetch_enabler.skprx\r", 1);
+                  "*KERNEL\rur0:tai/cpu_tweaks.skprx\r",
+                  "*KERNEL\r#ur0:tai/cpu_tweaks.skprx\r", 1);
     check_comment("switch: no trailing newline",
-                  "*KERNEL\r\nur0:tai/prefetch_enabler.skprx",
-                  "*KERNEL\r\n#ur0:tai/prefetch_enabler.skprx", 1);
+                  "*KERNEL\r\nur0:tai/cpu_tweaks.skprx",
+                  "*KERNEL\r\n#ur0:tai/cpu_tweaks.skprx", 1);
     check_comment("switch: already commented is left alone",
-                  "#ur0:tai/prefetch_enabler.skprx\n",
-                  "#ur0:tai/prefetch_enabler.skprx\n", 0);
+                  "#ur0:tai/cpu_tweaks.skprx\n",
+                  "#ur0:tai/cpu_tweaks.skprx\n", 0);
     check_comment("switch: indentation preserved",
-                  "  ur0:tai/prefetch_enabler.skprx\n",
-                  "#  ur0:tai/prefetch_enabler.skprx\n", 1);
+                  "  ur0:tai/cpu_tweaks.skprx\n",
+                  "#  ur0:tai/cpu_tweaks.skprx\n", 1);
     check_comment("switch: absent",
                   "*KERNEL\nur0:tai/other.skprx\n",
                   "*KERNEL\nur0:tai/other.skprx\n", 0);
     check_comment("switch: two copies, both commented",
-                  "ur0:tai/prefetch_enabler.skprx\nux0:tai/prefetch_enabler.skprx\n",
-                  "#ur0:tai/prefetch_enabler.skprx\n#ux0:tai/prefetch_enabler.skprx\n",
+                  "ur0:tai/cpu_tweaks.skprx\nux0:tai/cpu_tweaks.skprx\n",
+                  "#ur0:tai/cpu_tweaks.skprx\n#ux0:tai/cpu_tweaks.skprx\n",
                   2);
     check_comment("switch: other plugins untouched",
-                  "*KERNEL\na.skprx\nur0:tai/prefetch_enabler.skprx\nb.skprx\n",
-                  "*KERNEL\na.skprx\n#ur0:tai/prefetch_enabler.skprx\nb.skprx\n", 1);
+                  "*KERNEL\na.skprx\nur0:tai/cpu_tweaks.skprx\nb.skprx\n",
+                  "*KERNEL\na.skprx\n#ur0:tai/cpu_tweaks.skprx\nb.skprx\n", 1);
 
     /* No room for the '#': must refuse and change nothing. */
     {
-        char tight[31];
-        const char *in = "ur0:tai/prefetch_enabler.skprx";  /* exactly 30 */
-        int n = (int)strlen(in);
+        char tight[64];
+        const char *in = "ur0:tai/cpu_tweaks.skprx";
+        const int len = (int)strlen(in);
+        int n = len;
         memcpy(tight, in, (size_t)n);
-        int ret = pfe_comment_out_lines(tight, &n, n, "prefetch_enabler.skprx");
-        if (ret != -1 || n != 30 || memcmp(tight, in, 30) != 0) {
+        /* cap == current length: no room for the extra '#' */
+        int ret = pfe_comment_out_lines(tight, &n, len, "cpu_tweaks.skprx");
+        if (ret != -1 || n != len || memcmp(tight, in, (size_t)len) != 0) {
             printf("FAIL %-44s ret=%d n=%d\n", "switch: refuses when full", ret, n);
             failures++;
         } else {

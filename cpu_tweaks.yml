@@ -1,4 +1,4 @@
-prefetch_enabler:
+cpu_tweaks:
   attributes: 0
   version:
     major: 1

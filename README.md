@@ -1,4 +1,4 @@
-# vita_prefetch_enabler
+# vita_cpu_tweaks
 
 A taiHEN kernel plugin that re-enables the PS Vita's Cortex-A9 and PL310
 hardware prefetchers, which Sony's `kernel_boot_loader` explicitly disables
@@ -14,7 +14,7 @@ pl310.prefetch_offset = 15   # PL310 PREFETCH_CTRL bits 4:0
 
 Plus `probe = on` for a read-only recon log and `benchmark = once` for a
 one-shot on-device benchmark that switches itself back off and reboots. See
-[`prefetch_enabler.example.ini`](prefetch_enabler.example.ini) for every key,
+[`cpu_tweaks.example.ini`](cpu_tweaks.example.ini) for every key,
 each documented right above it.
 
 ## ⚠️ Compatibility — read before flashing this
@@ -46,7 +46,7 @@ Two things gate whether it works at all on a given unit/firmware:
 
 Go cautiously on any configuration other than retail 3.60: start with
 `probe = on` (read-only), confirm the plugin loads and the log looks sane,
-*then* set `enable = on` and read `ur0:data/prefetch_enabler.log` after the
+*then* set `enable = on` and read `ur0:data/cpu_tweaks.log` after the
 next boot.
 
 Note also that the dead-man's switch (below) comments out the plugin's own
@@ -101,21 +101,21 @@ The full tables, the ~330 MHz runs and the method are in
 
 ## Installing
 
-1. Copy `prefetch_enabler.skprx` (built below, or from a
-   [release](../../releases)) to `ur0:tai/prefetch_enabler.skprx`.
+1. Copy `cpu_tweaks.skprx` (built below, or from a
+   [release](../../releases)) to `ur0:tai/cpu_tweaks.skprx`.
 2. Add a line for it under `*KERNEL` in `ur0:tai/config.txt`:
    ```
-   ur0:tai/prefetch_enabler.skprx
+   ur0:tai/cpu_tweaks.skprx
    ```
-3. Copy [`prefetch_enabler.example.ini`](prefetch_enabler.example.ini) to
-   `ur0:data/prefetch_enabler.ini` and set `enable = on` (it ships as
+3. Copy [`cpu_tweaks.example.ini`](cpu_tweaks.example.ini) to
+   `ur0:data/cpu_tweaks.ini` and set `enable = on` (it ships as
    `enable = off`, with the measured-best register values already filled in).
 4. Reboot. `config.txt` is only read at boot, and this plugin only rereads
    its own config file at boot too — so any change to either file needs
    one more reboot to take effect.
 
 **Go cautiously the first time:** start with everything off, confirm the
-plugin loads and exits cleanly (check `ur0:data/prefetch_enabler.log` after
+plugin loads and exits cleanly (check `ur0:data/cpu_tweaks.log` after
 boot — it should say `nothing to do, exiting cleanly`), then `probe = on`,
 *then* `enable = on`. Keep a way to get back into `config.txt` (recovery
 menu, another kernel plugin, etc.) in case anything about your specific
@@ -130,11 +130,11 @@ Needs a Docker image providing vitasdk (the included `Dockerfile` pins one
 with `arm-vita-eabi-gcc` 10.3.0, known-good against this code):
 
 ```bash
-docker build -t vita_prefetch_enabler .
-docker run --rm -v "$PWD":/work vita_prefetch_enabler
+docker build -t vita_cpu_tweaks .
+docker run --rm -v "$PWD":/work vita_cpu_tweaks
 ```
 
-`build/prefetch_enabler.skprx` lands on your own filesystem via the volume
+`build/cpu_tweaks.skprx` lands on your own filesystem via the volume
 mount. Rerun the `docker run` line after any source change — no need to
 rebuild the image itself.
 

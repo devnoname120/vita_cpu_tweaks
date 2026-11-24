@@ -1,6 +1,6 @@
 """Turn the plugin's 'bench ...' log lines into per-access tables.
 
-Usage: python3 tools/bench_table.py <prefetch_enabler.log>
+Usage: python3 tools/bench_table.py <cpu_tweaks.log>
 
 Legs that appear in several rounds are merged, keeping each test's minimum.
 Prints, per leg, cycles/access and ns/access for the chase (latency vs
