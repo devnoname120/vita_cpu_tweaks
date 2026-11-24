@@ -1,0 +1,54 @@
+From 7a0e792a9bb1b7fdebec3789587269fb11f4b806 Mon Sep 17 00:00:00 2001
+From: Paul <devnoname120@gmail.com>
+Date: Tue, 24 Nov 2026 16:44:37 +0100
+Subject: [PATCH] SYSMEM DATAMP=0: skip unused .data resolution, fixes EBADMOVP
+ on retail 3.60
+
+Nothing in this library ever calls GETMODSVA(SYSMEM, 1, ...) - every
+internal call is seg=0 (.text), for XWSP/MBALLOC/MBFREE dispatch
+addresses. But GETMODSVA mandatorily also resolves .data on a module's
+first lookup whenever DATAMP is nonzero, regardless of which segment the
+caller actually wanted - so SPLx_TZS_INIT's own .text-only SYSMEM lookup
+(to register EXEC_WITH_SP) was dragging in a .data resolution nothing
+needs, via a table offset (.text+0x1C44) that isn't a MOVW/MOVT pair on
+retail 3.60 (confirmed via a read-only diagnostic capture - six
+independent, unrelated code sites in SYSMEM's .text decode the same
+constant 0x002120E4, so the offset itself is simply wrong for this
+firmware's actual compiled layout, not a one-off bad read).
+
+Fix: DATAMP=0 for SYSMEM, the same sentinel BUSERR's entry already uses
+for the same reason (no consumer, so no resolution needed). This is a
+single-field change to data nothing internal reads, not a guess at a
+corrected offset - the external caller that *does* want SYSMEM's .data
+(vita_prefetch_enabler, for an EXEC_WITH_SP scratch stack) is being
+changed separately to source its own memory instead, since borrowing a
+live, security-critical module's .data for a transient stack is a risk
+independent of whether the borrowed address is even correct.
+---
+ splib/arm/tzs_offsets.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/splib/arm/tzs_offsets.c b/splib/arm/tzs_offsets.c
+index 1164091..b4d8718 100644
+--- a/splib/arm/tzs_offsets.c
++++ b/splib/arm/tzs_offsets.c
+@@ -20,7 +20,15 @@ const uint32_t SPLTZl_OPS[] = {
+     // SYSMEM
+     0x0,
+     0x0A0DF900,
+-    (0x1C44 | (4 << 16)),
++    0x0, // SPLTZ_MFOPE_DATAMP - unused: nothing in this library ever calls
++         // GETMODSVA(SYSMEM, 1, ...), only external callers do, and this
++         // offset (.text+0x1C44) isn't a MOVW/MOVT pair on retail 3.60,
++         // failing SPLx_TZS_INIT's own .text-only SYSMEM lookup as a side
++         // effect (every GETMODSVA call mandatorily also resolves .data on
++         // a module's first lookup if DATAMP is nonzero, regardless of
++         // which segment the caller actually asked for). 0 skips that
++         // resolution entirely - same sentinel BUSERR already uses below
++         // for the same reason.
+     // EXCPMGR
+     0x0,
+     0xE59FF0F8,
+-- 
+2.54.0 (Apple Git-157)
+
