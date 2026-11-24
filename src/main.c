@@ -571,6 +571,53 @@ static void probe_sysmem_tail(void)
 }
 
 /*
+ * LPDDR0's access-control register block in the main xbar, identity-mapped
+ * secure-RW (boot 12 PRINTTBR: L1_SECTn 0xEC000000 1M, AP=001), so the
+ * secure read/write primitives reach it with sva == pa.
+ *
+ * psp2ref: MAIN_XBAR_OFFSET 0xEC000000, family stride 0x10000, device stride
+ * 0x400; ACCESS_CONTROL is family 6 and LPDDR0 is device 1, hence
+ * 0xEC000000 + 6*0x10000 + 1*0x400. psp2spl's SPLx_TZS_INIT zeroes the u64
+ * at +0xA0 of this block to "drop the ddrs firewall" and then assumes the TZ
+ * sections are usable from non-secure code.
+ *
+ * On retail 3.60 that assumption does not hold: boots 13-15 showed NS reads
+ * of TZ memory working while NS writes never become visible to secure world.
+ * If the firewall is expressed as several range entries and 3.60's monitor
+ * armed one other than the single u64 psp2spl clears, that would produce
+ * exactly this. Dump the block to find out which entries are live.
+ */
+#define XBAR_LPDDR0_ACCESS_CTRL_SVA 0xEC060400u
+#define XBAR_DDRFWAE_OFF            0xA0u
+
+static void probe_ddr_firewall(void)
+{
+    log_line("---- probe: LPDDR0 xbar access control (read-only) ----");
+    log_hex_line("probe xbar base sva ", XBAR_LPDDR0_ACCESS_CTRL_SVA);
+    log_hex_line("probe psp2spl clears u64 at ",
+                 XBAR_LPDDR0_ACCESS_CTRL_SVA + XBAR_DDRFWAE_OFF);
+
+    static const char hexd[] = "0123456789ABCDEF";
+    for (unsigned int off = 0; off < 0x400u; off += 32u) {
+        char line[128];
+        int n = 0;
+        for (int s = 12; s >= 0; s -= 4) line[n++] = hexd[(off >> s) & 0xF];
+        line[n++] = ':';
+        int ok = 1;
+        for (unsigned int w = 0; w < 32u; w += 4u) {
+            unsigned int v = 0;
+            if (SPLx_TZS_READ32(XBAR_LPDDR0_ACCESS_CTRL_SVA + off + w, &v) < 0) { ok = 0; break; }
+            line[n++] = ' ';
+            for (int s = 28; s >= 0; s -= 4) line[n++] = hexd[(v >> s) & 0xF];
+        }
+        line[n] = '\0';
+        if (!ok) { append_log("  read32 failed, stopping xbar dump"); break; }
+        append_log(line);
+    }
+    flush_log_to_disk();
+}
+
+/*
  * Offset into SYSMEM's .text of the stub slot, inside the unreferenced 0xB6
  * fill at the tail of its last page. Boot 12 measured the live/fill boundary
  * on retail 3.60 at .text+0x140FC (3844 bytes of fill to the page end), so
@@ -692,6 +739,22 @@ static void apply_l1_actlr(void)
 
     log_hex_line("l1 ns reads after write  ", ((volatile unsigned int *)ns_stub)[0]);
 
+    /*
+     * Did the write actually reach DRAM? lv0/F00D is a different bus
+     * initiator with its own path to physical memory, so reading the same PA
+     * through it separates the two candidate explanations for boots 13-15:
+     * if lv0 sees our instruction, DRAM holds it and the secure side is
+     * reading a stale cached copy; if lv0 still sees 0xB6, the NS write never
+     * landed and the DDR firewall is dropping it (its sibling entries are
+     * still armed - see probe_ddr_firewall()).
+     */
+    {
+        int lv0_val = 0;
+        int lr = SPLx_LV0_READ32(stub_pa, &lv0_val, SPLV0_COMMBACKUP_NEVER);
+        log_hex_line("l1 lv0 read ret ", (unsigned int)lr);
+        log_hex_line("l1 lv0 sees     ", (unsigned int)lv0_val);
+    }
+
     /* Drop any secure-tagged PL310 line for this address, which our NS-side
      * maintenance cannot reach. Issued through the secure write primitive
      * since PL310 is mapped secure-RW. */
@@ -797,6 +860,7 @@ int module_start(SceSize argc, const void *args)
     if (probe_only) {
         probe_secure_layout();
         probe_sysmem_tail();
+        probe_ddr_firewall();
         log_line("probe_only: skipping all EXEC_WITH_SP calls");
         goto write_out;
     }
