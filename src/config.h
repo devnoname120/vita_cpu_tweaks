@@ -17,12 +17,6 @@ enum pfe_tri {
     PFE_OFF  = 2
 };
 
-enum pfe_mode {
-    PFE_MODE_OFF   = 0,  /* do nothing (the default) */
-    PFE_MODE_APPLY = 1,  /* apply the register fields below */
-    PFE_MODE_PROBE = 2,  /* read-only recon, no secure writes */
-    PFE_MODE_BENCH = 3   /* memory benchmark 30 s after boot, then restore */
-};
 
 /* The register bits the config can drive. */
 #define PFE_ACTLR_L2_PREFETCH_HINT     (1u << 1)
@@ -49,13 +43,15 @@ extern const struct pfe_field pfe_actlr_fields[PFE_ACTLR_NFIELDS];
 extern const struct pfe_field pfe_pl310_fields[PFE_PL310_NFIELDS];
 
 struct pfe_config {
-    int mode;                         /* enum pfe_mode */
+    int enable;                       /* enable: apply the register fields */
+    int probe;                        /* probe: read-only recon, no secure writes */
+    int bench;                        /* benchmark = once: one-shot run, then reboot */
     int self_disable;                 /* 1 unless self_disable=no */
     int actlr[PFE_ACTLR_NFIELDS];     /* enum pfe_tri, same order as pfe_actlr_fields */
     int pl310[PFE_PL310_NFIELDS];     /* enum pfe_tri, same order as pfe_pl310_fields */
     int pl310_offset;                 /* -1 = keep, else 0-7, 15, 23 or 31 */
-    int bench_clocks_max;             /* bench.clocks: 1 = max (default), 0 = keep */
-    int bench_at_boot;                /* bench.timing: 1 = boot, 0 = home (default) */
+    int bench_clocks_max;             /* benchmark.clocks: 1 = max (default), 0 = keep */
+    int bench_at_boot;                /* benchmark.timing: 1 = boot, 0 = home (default) */
     int ignored;                      /* lines with an unknown key or bad value */
 };
 
@@ -79,9 +75,9 @@ int pfe_l2_offset_valid(int v);
  * UTF-8 BOM, to leading/trailing spaces and tabs around both key and value,
  * and to key/value case. Lines whose first non-blank character is '#' are
  * comments. Unrecognised keys and values are ignored and counted in
- * `ignored`, leaving that field at its default - mode off, every register
- * field PFE_KEEP - so a malformed file can never turn something on or change
- * a firmware setting.
+ * `ignored`, leaving that field at its default - enable/probe/benchmark off,
+ * every register field PFE_KEEP - so a malformed file can never turn
+ * something on or change a firmware setting.
  *
  * Every field of *out is initialised, whatever the input.
  */
@@ -107,11 +103,11 @@ void pfe_parse_config(const char *buf, int n, struct pfe_config *out);
  * -1 if there was not enough room, in which case `buf` is left untouched.
  */
 /*
- * Rewrites every active `mode = bench` line in buf to `mode = off`, in place,
- * keeping spacing, case of the key, line endings and any trailing comment.
- * The value shrinks by two bytes, so *io_n only ever goes down. Returns the
- * number of lines changed. Used so a bench run disables itself before it
- * starts, and the reboot that follows it boots normally.
+ * Rewrites every active `benchmark = once` line in buf to `benchmark = off`,
+ * in place, keeping spacing, case of the key, line endings and any trailing
+ * comment. The value shrinks by one byte per line, so *io_n only goes down.
+ * Returns the number of lines changed. This is what makes `once` mean once:
+ * the reboot that ends the run boots with the rest of the config unchanged.
  */
 int pfe_config_disable_bench(char *buf, int *io_n);
 

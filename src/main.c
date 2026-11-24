@@ -417,11 +417,11 @@ static void read_config(struct pfe_config *cfg)
     pfe_parse_config(buf, n, cfg);
 
     log_hex_line("config: bytes parsed ", (unsigned int)n);
-    static const char *const modes[] = { "off", "apply", "probe", "bench" };
     static const char *const tri[] = { "keep", "on", "off" };
     char line[96];
-    snprintf(line, sizeof(line), "config: mode=%s self_disable=%s",
-             modes[cfg->mode & 3], cfg->self_disable ? "yes" : "no");
+    snprintf(line, sizeof(line), "config: enable=%s probe=%s benchmark=%s self_disable=%s",
+             cfg->enable ? "on" : "off", cfg->probe ? "on" : "off",
+             cfg->bench ? "once" : "off", cfg->self_disable ? "yes" : "no");
     log_line(line);
     for (int i = 0; i < PFE_ACTLR_NFIELDS; i++) {
         snprintf(line, sizeof(line), "config: %s=%s",
@@ -439,8 +439,8 @@ static void read_config(struct pfe_config *cfg)
         snprintf(line, sizeof(line), "config: pl310.prefetch_offset=%d", cfg->pl310_offset);
         log_line(line);
     }
-    log_line(cfg->bench_clocks_max ? "config: bench.clocks=max" : "config: bench.clocks=keep");
-    log_line(cfg->bench_at_boot ? "config: bench.timing=boot" : "config: bench.timing=home");
+    log_line(cfg->bench_clocks_max ? "config: benchmark.clocks=max" : "config: benchmark.clocks=keep");
+    log_line(cfg->bench_at_boot ? "config: benchmark.timing=boot" : "config: benchmark.timing=home");
     if (cfg->ignored) {
         snprintf(line, sizeof(line),
                  "config: %d line(s) IGNORED - unknown key or bad value", cfg->ignored);
@@ -1296,7 +1296,7 @@ static void log_bench_res(const char *kind, unsigned int param,
 }
 
 /*
- * Re-applied before every individual test when bench.clocks=max. A one-off
+ * Re-applied before every individual test when benchmark.clocks=max. A one-off
  * set does not hold: boot 39 set 500 MHz and the per-leg clock read back
  * ~406 for the first legs and ~330 for the rest - something (PSVshell or
  * ScePower reapplying the shell's request) puts it back within seconds.
@@ -1325,7 +1325,7 @@ static int bench_leg_thread(SceSize args, void *argp)
 }
 
 /*
- * Clocks for bench.clocks=max: what games run at. 500 MHz needs a clock
+ * Clocks for benchmark.clocks=max: what games run at. 500 MHz needs a clock
  * plugin (PSVshell turns a 500 request into 444 x 16/15); without one the
  * setter refuses it and 444 is used instead. Each leg logs the clock it
  * actually ran at (cycles / microseconds), so this is checked, not assumed.
@@ -1492,8 +1492,8 @@ static void save_bench_log(void)
 }
 
 /*
- * Rewrites mode = bench to mode = off in the plugin's own config, then reads
- * the file back and checks it now parses as something other than bench.
+ * Rewrites benchmark = once to benchmark = off in the plugin's own config,
+ * then reads the file back and checks it now parses with the benchmark off.
  * Gating, like the dead-man's switch: a bench that ends in a reboot must not
  * be able to run again on the next boot, or self_disable=no would turn it
  * into a reboot loop. Returns 0 only when that is confirmed.
@@ -1508,7 +1508,7 @@ static int disable_bench_in_config(void)
     if (n <= 0 || n >= (int)sizeof(buf)) return -2;
 
     int changed = pfe_config_disable_bench(buf, &n);
-    log_hex_line("bench: mode lines switched to off ", (unsigned int)changed);
+    log_hex_line("benchmark: once->off lines ", (unsigned int)changed);
     if (changed > 0) {
         fd = ksceIoOpen(CONFIG_PATH, SCE_O_WRONLY | SCE_O_TRUNC, 0);
         if (fd < 0) return -3;
@@ -1524,7 +1524,7 @@ static int disable_bench_in_config(void)
     ksceIoClose(fd);
     struct pfe_config check;
     pfe_parse_config(buf, n > 0 ? n : 0, &check);
-    return check.mode == PFE_MODE_BENCH ? -6 : 0;
+    return check.bench ? -6 : 0;
 }
 
 /*
@@ -1605,13 +1605,30 @@ int module_start(SceSize argc, const void *args)
         log_line("selfdisable: self_disable=no - staying enabled for next boot");
     }
 
+    /*
+     * benchmark = once: switch it off in the config before anything else,
+     * so the reboot that ends the run - and any boot after a crash during
+     * it - comes up with enable/probe exactly as the user left them.
+     * Gating: if that cannot be confirmed, the bench does not run.
+     */
+    if (cfg.bench) {
+        int dr = disable_bench_in_config();
+        if (dr < 0) {
+            log_hex_line("benchmark: could not switch it to off in the config, NOT running: ",
+                         (unsigned int)dr);
+            cfg.bench = 0;
+        } else {
+            log_line("benchmark: config now says benchmark = off for the next boot");
+        }
+        flush_log_to_disk();
+    }
+
     struct pfe_masks mk;
     pfe_config_masks(&cfg, &mk);
-    int want_actlr = (mk.actlr_set | mk.actlr_clear) != 0;
-    int want_pl310 = (mk.pl310_set | mk.pl310_clear) != 0;
+    int want_actlr = cfg.enable && (mk.actlr_set | mk.actlr_clear) != 0;
+    int want_pl310 = cfg.enable && (mk.pl310_set | mk.pl310_clear) != 0;
 
-    if (cfg.mode == PFE_MODE_OFF ||
-        (cfg.mode == PFE_MODE_APPLY && !want_actlr && !want_pl310)) {
+    if (!cfg.bench && !cfg.probe && !want_actlr && !want_pl310) {
         log_line("nothing to do, exiting cleanly");
         goto write_out;
     }
@@ -1627,35 +1644,23 @@ int module_start(SceSize argc, const void *args)
         flush_log_to_disk(); /* checkpoint: past the point every prior boot failed at */
     }
 
-    if (cfg.mode == PFE_MODE_PROBE) {
+    if (cfg.probe) {
         probe_cpu_regs();
         probe_secure_layout();
         probe_sysmem_tail();
         probe_ddr_firewall();
-        log_line("probe: skipping all EXEC_WITH_SP calls");
-        goto write_out;
-    }
-
-    if (cfg.mode == PFE_MODE_BENCH) {
-        int dr = disable_bench_in_config();
-        if (dr < 0) {
-            log_hex_line("bench: could not switch mode to off in the config, NOT running: ",
-                         (unsigned int)dr);
-            goto write_out;
-        }
-        log_line("bench: config now says mode = off for the next boot");
+        log_line("probe: done (read-only, no EXEC_WITH_SP calls)");
         flush_log_to_disk();
     }
 
-    if (cfg.mode == PFE_MODE_BENCH && cfg.bench_at_boot) {
+    if (cfg.bench && cfg.bench_at_boot) {
         /*
-         * bench.timing=boot: run right here, holding boot, on a near-idle
-         * system. Boots 33-34 showed the cost: the log is complete and on
-         * disk before this returns, but SceShell's MTP service then fails
-         * to start and the shell crashes - so the run ends in a reboot
-         * instead, and the config was already switched to mode = off.
+         * benchmark.timing=boot: run right here, holding boot, on a near-idle
+         * system. Holding boot this long makes SceShell's MTP service fail
+         * and the shell crash afterwards (boots 33-34), so the run ends in a
+         * reboot instead; the config already says benchmark = off.
          */
-        log_line("mode=bench timing=boot: running now, holding boot");
+        log_line("bench: timing=boot, running now, holding boot");
         run_bench_suite(cfg.bench_clocks_max);
         probe_cpu_regs();
         log_line("==== vita_prefetch_enabler bench done ====");
@@ -1665,10 +1670,11 @@ int module_start(SceSize argc, const void *args)
         goto write_out;
     }
 
-    if (cfg.mode == PFE_MODE_BENCH) {
-        /* The suite sets every leg itself and restores the firmware state
-         * afterwards, so the register keys are ignored in this mode. */
-        log_line("mode=bench: suite deferred to a thread, starting in 30 s");
+    if (cfg.bench) {
+        /* Nothing is applied on a bench boot: the suite sets every leg
+         * itself from the firmware's values, restores them, and reboots
+         * into a normal boot that applies the config. */
+        log_line("bench: timing=home, suite deferred to a thread, starting in 30 s");
         g_bench_clocks_max = cfg.bench_clocks_max;
         SceUID th = ksceKernelCreateThread("pfe_bench_main", bench_main_thread,
                                            0x60, 0x4000, 0, 0, NULL);
@@ -1677,7 +1683,7 @@ int module_start(SceSize argc, const void *args)
         goto write_out;
     }
 
-    /* mode=apply */
+    /* enable = on */
     if (want_actlr) {
         apply_l1_actlr(mk.actlr_set, mk.actlr_clear);
         flush_log_to_disk();

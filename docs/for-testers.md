@@ -59,21 +59,21 @@ than running without that safety net.
 
 `ur0:data/prefetch_enabler.ini` ships set to step 1. After each boot, read
 `ur0:data/prefetch_enabler.log`, then re-enable the config.txt line, change
-`mode`, and reboot for the next step.
+the config as below, and reboot for the next step.
 
-1. **`mode = probe`** (as shipped). Read-only: dumps your secure page-table
+1. **`probe = on`, `enable = off`** (as shipped). Read-only: dumps your secure page-table
    layout and makes no secure writes whatsoever. This is the most useful
    step to send back — it says whether the rest would even work on your
    firmware. The log will be large; that's expected.
-2. **`mode = apply`**. Sets the PL310 fields with one secure MMIO write, and
+2. **`probe = off`, `enable = on`**. Sets the PL310 fields with one secure MMIO write, and
    the ACTLR bit by injecting a page-table descriptor to get a
    secure-executable scratch page, running a 9-word stub on each core, then
    cleaning up after itself. Expect `actlr before 0x149` / `after 0x14B`
    four times, `actlr: requested bits APPLIED on all cores`,
    `prefetch_ctrl before 0x21000000` / `after 0x3100000F` and
    `pl310: requested fields APPLIED`.
-3. **`mode = bench`**. First switches its own config line back to
-   `mode = off`. Then, 30 seconds after boot, it raises the clocks to game
+3. **`benchmark = once`**. First switches its own config line to
+   `benchmark = off`. Then, 30 seconds after boot, it raises the clocks to game
    levels (CPU 500 MHz), runs a memory benchmark across the prefetch
    settings for about 40 seconds, puts the firmware's settings and clocks
    back, and reboots the console. Leave the Vita alone for two minutes

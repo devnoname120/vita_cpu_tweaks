@@ -37,7 +37,8 @@ static void expect_hex(const char *name, unsigned int got, unsigned int want)
     }
 }
 
-static int mode_of(const char *t)    { struct pfe_config c; parse(t, &c); return c.mode; }
+static int enable_of(const char *t)  { struct pfe_config c; parse(t, &c); return c.enable; }
+static int bench_of(const char *t)   { struct pfe_config c; parse(t, &c); return c.bench; }
 static int ignored_of(const char *t) { struct pfe_config c; parse(t, &c); return c.ignored; }
 static int offset_of(const char *t)  { struct pfe_config c; parse(t, &c); return c.pl310_offset; }
 static int dside_of(const char *t)   { struct pfe_config c; parse(t, &c); return c.actlr[0]; }
@@ -68,41 +69,53 @@ int main(void)
 
     /* --- defaults: nothing happens unless asked --- */
     pfe_parse_config(NULL, 0, &c);
-    expect("default mode off", c.mode, PFE_MODE_OFF);
+    expect("default enable off", c.enable, 0);
+    expect("default probe off", c.probe, 0);
+    expect("default bench off", c.bench, 0);
     expect("default self_disable on", c.self_disable, 1);
     expect("default offset keep", c.pl310_offset, -1);
-    expect("default bench.clocks max", c.bench_clocks_max, 1);
+    expect("default benchmark.clocks max", c.bench_clocks_max, 1);
     pfe_config_masks(&c, &m);
     expect_hex("default masks all zero",
                m.actlr_set | m.actlr_clear | m.pl310_set | m.pl310_clear, 0);
 
     /* --- line endings and BOM: the whole point of this parser --- */
-    expect("LF", mode_of("mode=apply\n"), PFE_MODE_APPLY);
-    expect("CRLF", mode_of("mode=apply\r\n"), PFE_MODE_APPLY);
-    expect("bare CR", mode_of("x=1\rmode=apply\r"), PFE_MODE_APPLY);
-    expect("mixed LF/CRLF", mode_of("x=1\nmode=probe\r\n"), PFE_MODE_PROBE);
-    expect("no trailing newline", mode_of("mode=bench"), PFE_MODE_BENCH);
-    expect("CRLF blank lines", mode_of("\r\n\r\nmode=apply\r\n\r\n"), PFE_MODE_APPLY);
-    expect("BOM + CRLF", mode_of("\xEF\xBB\xBF" "mode=apply\r\n"), PFE_MODE_APPLY);
-    expect("BOM alone", mode_of("\xEF\xBB\xBF"), PFE_MODE_OFF);
+    expect("LF", enable_of("enable=on\n"), 1);
+    expect("CRLF", enable_of("enable=on\r\n"), 1);
+    expect("bare CR", enable_of("x=1\renable=on\r"), 1);
+    expect("mixed LF/CRLF", enable_of("x=1\nenable=on\r\n"), 1);
+    expect("no trailing newline", enable_of("enable=on"), 1);
+    expect("CRLF blank lines", enable_of("\r\n\r\nenable=on\r\n\r\n"), 1);
+    expect("BOM + CRLF", enable_of("\xEF\xBB\xBF" "enable=on\r\n"), 1);
+    expect("BOM alone", enable_of("\xEF\xBB\xBF"), 0);
     expect("BOM before dotted key",
            dside_of("\xEF\xBB\xBF" "actlr.l1_dside_prefetch=on\r\n"), PFE_ON);
 
     /* --- whitespace, case, comments --- */
-    expect("spaces around =", mode_of("  mode  =  apply  \n"), PFE_MODE_APPLY);
-    expect("tabs", mode_of("\tmode\t=\tapply\t\n"), PFE_MODE_APPLY);
-    expect("uppercase", mode_of("MODE=APPLY\n"), PFE_MODE_APPLY);
-    expect("comment line", mode_of("#mode=apply\n"), PFE_MODE_OFF);
-    expect("indented comment", mode_of("   # mode=apply\n"), PFE_MODE_OFF);
-    expect("trailing comment", mode_of("mode = apply   # do it\n"), PFE_MODE_APPLY);
+    expect("spaces around =", enable_of("  enable  =  on  \n"), 1);
+    expect("tabs", enable_of("\tenable\t=\ton\t\n"), 1);
+    expect("uppercase", enable_of("ENABLE=ON\n"), 1);
+    expect("comment line", enable_of("#enable=on\n"), 0);
+    expect("indented comment", enable_of("   # enable=on\n"), 0);
+    expect("trailing comment", enable_of("enable = on   # do it\n"), 1);
     expect("trailing comment on tri",
            dside_of("actlr.l1_dside_prefetch = on # bit 2\n"), PFE_ON);
 
-    /* --- mode --- */
-    expect("mode garbage => off", mode_of("mode=fast\n"), PFE_MODE_OFF);
-    expect("mode garbage counted", ignored_of("mode=fast\n"), 1);
-    expect("mode last wins", mode_of("mode=apply\nmode=off\n"), PFE_MODE_OFF);
-    expect("old key probe_only ignored", mode_of("probe_only=on\n"), PFE_MODE_OFF);
+    /* --- enable / probe / bench switches --- */
+    expect("enable garbage => off", enable_of("enable=yes\n"), 0);
+    expect("enable garbage counted", ignored_of("enable=yes\n"), 1);
+    expect("enable garbage keeps earlier value", enable_of("enable=on\nenable=1\n"), 1);
+    expect("enable last wins", enable_of("enable=on\nenable=off\n"), 0);
+    { struct pfe_config t; parse("probe=on\n", &t); expect("probe on", t.probe, 1); }
+    expect("benchmark once", bench_of("benchmark = once\r\n"), 1);
+    expect("benchmark ONCE", bench_of("BENCHMARK = ONCE\n"), 1);
+    expect("benchmark off", bench_of("benchmark = off\n"), 0);
+    expect("benchmark on is not a value", bench_of("benchmark = on\n"), 0);
+    expect("benchmark on counted as ignored", ignored_of("benchmark = on\n"), 1);
+    expect("benchmark.timing is not benchmark", bench_of("benchmark.timing = boot\n"), 0);
+    expect("old key bench ignored", bench_of("bench = on\n"), 0);
+    expect("old key mode ignored", ignored_of("mode=apply\n"), 1);
+    expect("old key probe_only ignored", enable_of("probe_only=on\n"), 0);
     expect("old keys counted as ignored",
            ignored_of("probe_only=on\nl1_prefetch=on\nl2_prefetch=on\n"), 3);
 
@@ -142,7 +155,7 @@ int main(void)
     expect_hex("pl310 only touches pl310", m.actlr_set | m.actlr_clear, 0);
 
     /* The measured-best settings reproduce boot 36's register values. */
-    parse("mode=apply\nactlr.l1_dside_prefetch=on\nactlr.l2_prefetch_hint=on\n"
+    parse("enable=on\nactlr.l1_dside_prefetch=on\nactlr.l2_prefetch_hint=on\n"
           "pl310.data_prefetch=on\npl310.prefetch_offset=15\n", &c);
     pfe_config_masks(&c, &m);
     expect_hex("best: ACTLR 0x149 -> 0x14F",
@@ -168,37 +181,37 @@ int main(void)
     pfe_config_masks(&c, &m);
     expect_hex("offset 0 still clears the field", m.pl310_clear, 0x1F);
 
-    /* --- bench.clocks --- */
-    parse("bench.clocks=keep\n", &c);  expect("bench.clocks keep", c.bench_clocks_max, 0);
-    parse("bench.clocks=max\n", &c);   expect("bench.clocks max", c.bench_clocks_max, 1);
-    parse("bench.clocks=500\n", &c);   expect("bench.clocks garbage => max", c.bench_clocks_max, 1);
+    /* --- benchmark.clocks --- */
+    parse("benchmark.clocks=keep\n", &c);  expect("benchmark.clocks keep", c.bench_clocks_max, 0);
+    parse("benchmark.clocks=max\n", &c);   expect("benchmark.clocks max", c.bench_clocks_max, 1);
+    parse("benchmark.clocks=500\n", &c);   expect("benchmark.clocks garbage => max", c.bench_clocks_max, 1);
 
-    /* --- bench.timing --- */
-    parse("", &c);                      expect("bench.timing default home", c.bench_at_boot, 0);
-    parse("bench.timing=boot\n", &c);  expect("bench.timing boot", c.bench_at_boot, 1);
-    parse("bench.timing = BOOT\r\n", &c); expect("bench.timing BOOT CRLF", c.bench_at_boot, 1);
-    parse("bench.timing=home\n", &c);  expect("bench.timing home", c.bench_at_boot, 0);
-    parse("bench.timing=now\n", &c);   expect("bench.timing garbage => home", c.bench_at_boot, 0);
-    expect("bench.timing garbage counted", ignored_of("bench.timing=now\n"), 1);
+    /* --- benchmark.timing --- */
+    parse("", &c);                      expect("benchmark.timing default home", c.bench_at_boot, 0);
+    parse("benchmark.timing=boot\n", &c);  expect("benchmark.timing boot", c.bench_at_boot, 1);
+    parse("benchmark.timing = BOOT\r\n", &c); expect("benchmark.timing BOOT CRLF", c.bench_at_boot, 1);
+    parse("benchmark.timing=home\n", &c);  expect("benchmark.timing home", c.bench_at_boot, 0);
+    parse("benchmark.timing=now\n", &c);   expect("benchmark.timing garbage => home", c.bench_at_boot, 0);
+    expect("benchmark.timing garbage counted", ignored_of("benchmark.timing=now\n"), 1);
 
-    /* --- bench mode disables itself --- */
+    /* --- benchmark = once becomes benchmark = off --- */
     {
         static const struct { const char *name, *in, *want; int ret; } t[] = {
-            { "disable: plain", "mode=bench\n", "mode=off\n", 1 },
-            { "disable: spacing and comment kept",
-              "mode = bench    # off | apply | probe | bench\r\n",
-              "mode = off    # off | apply | probe | bench\r\n", 1 },
-            { "disable: uppercase", "MODE = BENCH\n", "MODE = off\n", 1 },
-            { "disable: BOM, no newline", "\xEF\xBB\xBF" "mode=bench",
-              "\xEF\xBB\xBF" "mode=off", 1 },
-            { "disable: commented line untouched", "#mode = bench\n", "#mode = bench\n", 0 },
-            { "disable: apply untouched", "mode = apply\n", "mode = apply\n", 0 },
-            { "disable: other keys untouched",
-              "x = bench\nbench.timing = boot\nmode = bench\nbench.clocks = max\n",
-              "x = bench\nbench.timing = boot\nmode = off\nbench.clocks = max\n", 1 },
-            { "disable: two mode lines",
-              "mode=bench\r\nmode=bench\r\n", "mode=off\r\nmode=off\r\n", 2 },
-            { "disable: bare CR", "a=1\rmode=bench\rb=2\r", "a=1\rmode=off\rb=2\r", 1 },
+            { "once: plain", "benchmark=once\n", "benchmark=off\n", 1 },
+            { "once: spacing and comment kept",
+              "benchmark = once    # once | off\r\n",
+              "benchmark = off    # once | off\r\n", 1 },
+            { "once: uppercase", "BENCHMARK = ONCE\n", "BENCHMARK = off\n", 1 },
+            { "once: BOM, no newline", "\xEF\xBB\xBF" "benchmark=once",
+              "\xEF\xBB\xBF" "benchmark=off", 1 },
+            { "once: commented line untouched", "#benchmark = once\n", "#benchmark = once\n", 0 },
+            { "once: already off", "benchmark = off\n", "benchmark = off\n", 0 },
+            { "once: enable and sub-keys untouched",
+              "enable = on\nbenchmark.timing = boot\nbenchmark = once\nbenchmark.clocks = max\n",
+              "enable = on\nbenchmark.timing = boot\nbenchmark = off\nbenchmark.clocks = max\n", 1 },
+            { "once: two lines",
+              "benchmark=once\r\nbenchmark=once\r\n", "benchmark=off\r\nbenchmark=off\r\n", 2 },
+            { "once: bare CR", "a=1\rbenchmark=once\rb=2\r", "a=1\rbenchmark=off\rb=2\r", 1 },
         };
         for (unsigned i = 0; i < sizeof(t) / sizeof(t[0]); i++) {
             char b[256];
@@ -214,17 +227,19 @@ int main(void)
                 printf("ok   %s\n", t[i].name);
             }
         }
-        /* after disabling, the parser must see mode off */
-        char b[128] = "mode = bench  # x\r\nbench.timing = boot\r\n";
+        /* Afterwards the parser sees the benchmark off and enable untouched. */
+        char b[128] = "enable = on\r\nbenchmark = once  # x\r\nbenchmark.timing = boot\r\n";
         int n = (int)strlen(b);
         pfe_config_disable_bench(b, &n);
         pfe_parse_config(b, n, &c);
-        expect("disable: parses as mode off afterwards", c.mode, PFE_MODE_OFF);
-        expect("disable: nothing else ignored", c.ignored, 0);
+        expect("once: benchmark off afterwards", c.bench, 0);
+        expect("once: enable still on", c.enable, 1);
+        expect("once: timing kept", c.bench_at_boot, 1);
+        expect("once: nothing ignored", c.ignored, 0);
     }
 
     /* --- unknown lines are counted, never acted on --- */
-    expect("no equals counted", ignored_of("mode apply\n"), 1);
+    expect("no equals counted", ignored_of("enable on\n"), 1);
     expect("unknown key counted", ignored_of("actlr.exclusive_cache=on\n"), 1);
     expect("blank and comment lines not counted", ignored_of("\n# x\n\n"), 0);
 
@@ -245,13 +260,35 @@ int main(void)
             for (int i = 0; i < n; i++) lines += big[i] == '\n';
             expect("example fits the device buffer even as CRLF",
                    n + lines <= PFE_CONFIG_MAX_BYTES, 1);
-            expect("example: mode off as shipped", c.mode, PFE_MODE_OFF);
+            expect("example: enable off as shipped", c.enable, 0);
+            expect("example: probe off as shipped", c.probe, 0);
+            expect("example: benchmark off as shipped", c.bench, 0);
             expect("example: self_disable on", c.self_disable, 1);
             pfe_config_masks(&c, &m);
             expect_hex("example: ACTLR 0x149 -> 0x14B if applied",
                        (0x149u & ~m.actlr_clear) | m.actlr_set, 0x14B);
             expect_hex("example: PL310 -> 0x3100000F if applied",
                        (0x21000000u & ~m.pl310_clear) | m.pl310_set, 0x3100000F);
+        }
+    }
+
+    /* The tester handout's config must parse too, as step 1 (probe only). */
+    {
+        FILE *f = fopen("docs/for-testers.config.ini", "rb");
+        if (!f) f = fopen("../docs/for-testers.config.ini", "rb");
+        if (!f) {
+            printf("FAIL %-48s cannot open tester config\n", "tester config");
+            failures++;
+        } else {
+            static char big[8192];
+            int n = (int)fread(big, 1, sizeof(big), f);
+            fclose(f);
+            pfe_parse_config(big, n, &c);
+            expect("tester config: every line recognised", c.ignored, 0);
+            expect("tester config: probe on as shipped", c.probe, 1);
+            expect("tester config: enable off as shipped", c.enable, 0);
+            expect("tester config: benchmark off as shipped", c.bench, 0);
+            expect("tester config: self_disable on", c.self_disable, 1);
         }
     }
 

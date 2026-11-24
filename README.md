@@ -6,14 +6,16 @@ at every boot. Every prefetch-related register field gets its own key in a
 plain INI-style config file — no rebuilding, no runtime tool needed.
 
 ```ini
-mode = apply                 # off | apply | probe | bench
+enable = on                  # on | off
 actlr.l2_prefetch_hint = on  # Cortex-A9 ACTLR bit 1
 pl310.data_prefetch = on     # PL310 PREFETCH_CTRL bit 28
 pl310.prefetch_offset = 15   # PL310 PREFETCH_CTRL bits 4:0
 ```
 
-See [`prefetch_enabler.example.ini`](prefetch_enabler.example.ini) for all
-13 keys, each documented right above it.
+Plus `probe = on` for a read-only recon log and `benchmark = once` for a
+one-shot on-device benchmark that switches itself back off and reboots. See
+[`prefetch_enabler.example.ini`](prefetch_enabler.example.ini) for every key,
+each documented right above it.
 
 ## ⚠️ Compatibility — read before flashing this
 
@@ -43,15 +45,15 @@ Two things gate whether it works at all on a given unit/firmware:
    a logged reason instead of doing something unpredictable.
 
 Go cautiously on any configuration other than retail 3.60: start with
-`mode = probe` (read-only), confirm the plugin loads and the log looks sane,
-*then* switch to `mode = apply` and read `ur0:data/prefetch_enabler.log`
-after the next boot.
+`probe = on` (read-only), confirm the plugin loads and the log looks sane,
+*then* set `enable = on` and read `ur0:data/prefetch_enabler.log` after the
+next boot.
 
 Note also that the dead-man's switch (below) comments out the plugin's own
 `config.txt` line on every boot, so by default it applies the settings once
 and then disables itself. That is deliberate for testing. `self_disable = no`
 keeps it enabled across boots, which removes that safety net: only set it
-once `mode = apply` has booted cleanly on your unit.
+once `enable = on` has booted cleanly on your unit.
 
 This also only re-applies on a **cold boot** — not on resume-from-sleep.
 Whether sleep/resume clears these bits on this hardware was never safely
@@ -62,7 +64,7 @@ sleep."
 ## Why bother
 
 Measured on the retail unit itself with the plugin's built-in benchmark
-(`mode = bench`, `bench.timing = boot`): independent strided loads over
+(`benchmark = once`, `benchmark.timing = boot`): independent strided loads over
 memory that is in no cache, CPU at 500 MHz with bus 222 / GPU 222 /
 crossbar 166 MHz (the clocks games use), run during boot on a near-idle
 system, three interleaved rounds. Two separate boots agree to a median of
@@ -106,16 +108,16 @@ The full tables, the ~330 MHz runs and the method are in
    ur0:tai/prefetch_enabler.skprx
    ```
 3. Copy [`prefetch_enabler.example.ini`](prefetch_enabler.example.ini) to
-   `ur0:data/prefetch_enabler.ini` and set `mode = apply` (it ships as
-   `mode = off`, with the measured-best register values already filled in).
+   `ur0:data/prefetch_enabler.ini` and set `enable = on` (it ships as
+   `enable = off`, with the measured-best register values already filled in).
 4. Reboot. `config.txt` is only read at boot, and this plugin only rereads
    its own config file at boot too — so any change to either file needs
    one more reboot to take effect.
 
-**Go cautiously the first time:** start with `mode = off`, confirm the
+**Go cautiously the first time:** start with everything off, confirm the
 plugin loads and exits cleanly (check `ur0:data/prefetch_enabler.log` after
-boot — it should say `nothing to do, exiting cleanly`), then `mode = probe`,
-*then* `mode = apply`. Keep a way to get back into `config.txt` (recovery
+boot — it should say `nothing to do, exiting cleanly`), then `probe = on`,
+*then* `enable = on`. Keep a way to get back into `config.txt` (recovery
 menu, another kernel plugin, etc.) in case anything about your specific
 unit/firmware doesn't match what this was built against.
 

@@ -275,7 +275,7 @@ That splits the two knobs:
 
 * **Bench at boot, then self-disable and reboot (boots 43-44).** Holding
   boot only costs a SceShell crash *after* the suite has finished and
-  written its log (boots 33-34), so `bench.timing = boot` runs it inside
+  written its log (boots 33-34), so `bench.timing = boot` (now `benchmark.timing`) runs it inside
   `module_start` on a near-idle system. To keep that from ever crashing or
   repeating, a bench run now (1) rewrites its own config line to
   `mode = off` in place and re-reads the file to confirm, refusing to run
@@ -295,6 +295,16 @@ That splits the two knobs:
   2 MiB random chase, unusable at the home screen, is now stable: 33.8
   cycles stock, 31.3 with hint + PL310 offset 15 (-7%), 30.0 with offset 0.
   The GPU clock also takes at boot (222/222), unlike at the idle home screen.
+
+* **`enable` / `probe` / `benchmark = once` (boots 45-48).** The single
+  `mode` key became three switches, so a one-shot benchmark no longer
+  knocks out a config meant to stay enabled: `benchmark = once` rewrites
+  only its own line to `benchmark = off` and leaves `enable` alone. Boots
+  47-48, with `enable = on`, `self_disable = no`, `benchmark = once`,
+  `benchmark.timing = boot`: the benchmark boot switched its line (CRLF
+  kept), ran, and rebooted; the next boot came up with the plugin still
+  enabled and applied ACTLR `0x14B` x4 and PL310 `0x3100000F`. No crash dump.
+  (In the code and earlier entries, "bench mode" refers to this.)
 
   The rest of this bullet is the record of how the dead ends were eliminated.
 

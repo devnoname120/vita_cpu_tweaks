@@ -115,6 +115,15 @@ static void set_tri(int *slot, const char *val, int vallen, int *ignored)
     *slot = t;
 }
 
+/* on -> 1, off -> 0; anything else leaves the field and counts as ignored.
+ * A bad value can therefore never turn something on. */
+static void set_onoff(int *slot, const char *val, int vallen, int *ignored)
+{
+    if      (streq_ci(val, vallen, "on"))  *slot = 1;
+    else if (streq_ci(val, vallen, "off")) *slot = 0;
+    else (*ignored)++;
+}
+
 static void apply_key(struct pfe_config *out, const char *key, int keylen,
                       const char *val, int vallen)
 {
@@ -129,12 +138,14 @@ static void apply_key(struct pfe_config *out, const char *key, int keylen,
             return;
         }
 
-    if (streq_ci(key, keylen, "mode")) {
-        if      (streq_ci(val, vallen, "off"))   out->mode = PFE_MODE_OFF;
-        else if (streq_ci(val, vallen, "apply")) out->mode = PFE_MODE_APPLY;
-        else if (streq_ci(val, vallen, "probe")) out->mode = PFE_MODE_PROBE;
-        else if (streq_ci(val, vallen, "bench")) out->mode = PFE_MODE_BENCH;
-        else { out->mode = PFE_MODE_OFF; out->ignored++; }
+    if (streq_ci(key, keylen, "enable")) {
+        set_onoff(&out->enable, val, vallen, &out->ignored);
+    } else if (streq_ci(key, keylen, "probe")) {
+        set_onoff(&out->probe, val, vallen, &out->ignored);
+    } else if (streq_ci(key, keylen, "benchmark")) {
+        if      (streq_ci(val, vallen, "once")) out->bench = 1;
+        else if (streq_ci(val, vallen, "off"))  out->bench = 0;
+        else out->ignored++;
     } else if (streq_ci(key, keylen, "self_disable")) {
         /* Only an explicit "no" turns the dead-man's switch off. */
         if      (streq_ci(val, vallen, "no"))  out->self_disable = 0;
@@ -145,11 +156,11 @@ static void apply_key(struct pfe_config *out, const char *key, int keylen,
         int v = parse_small_uint(val, vallen);
         if (pfe_l2_offset_valid(v)) out->pl310_offset = v;
         else out->ignored++;
-    } else if (streq_ci(key, keylen, "bench.timing")) {
+    } else if (streq_ci(key, keylen, "benchmark.timing")) {
         if      (streq_ci(val, vallen, "boot")) out->bench_at_boot = 1;
         else if (streq_ci(val, vallen, "home")) out->bench_at_boot = 0;
         else out->ignored++;
-    } else if (streq_ci(key, keylen, "bench.clocks")) {
+    } else if (streq_ci(key, keylen, "benchmark.clocks")) {
         if      (streq_ci(val, vallen, "max"))  out->bench_clocks_max = 1;
         else if (streq_ci(val, vallen, "keep")) out->bench_clocks_max = 0;
         else out->ignored++;
@@ -160,7 +171,9 @@ static void apply_key(struct pfe_config *out, const char *key, int keylen,
 
 void pfe_parse_config(const char *buf, int n, struct pfe_config *out)
 {
-    out->mode = PFE_MODE_OFF;
+    out->enable = 0;
+    out->probe = 0;
+    out->bench = 0;
     out->self_disable = 1;
     for (int i = 0; i < PFE_ACTLR_NFIELDS; i++) out->actlr[i] = PFE_KEEP;
     for (int i = 0; i < PFE_PL310_NFIELDS; i++) out->pl310[i] = PFE_KEEP;
@@ -217,13 +230,12 @@ void pfe_config_masks(const struct pfe_config *cfg, struct pfe_masks *m)
     }
 }
 
-int pfe_config_disable_bench(char *buf, int *io_n)
+/* Finds the value of the next active `benchmark = once` line at or after
+ * *pos. Returns its offset in buf, or -1. Advances *pos past that line. */
+static int find_benchmark_once(const char *buf, int n, int *pos)
 {
-    if (!buf || !io_n || *io_n <= 0) return 0;
-    int n = *io_n, changed = 0;
-    int pos = skip_bom(buf, n), start = 0, len = 0;
-
-    while (next_line(buf, n, &pos, &start, &len)) {
+    int start = 0, len = 0;
+    while (next_line(buf, n, pos, &start, &len)) {
         const char *line = buf + start;
         int l = len;
         trim(&line, &l);
@@ -236,21 +248,29 @@ int pfe_config_disable_bench(char *buf, int *io_n)
         const char *key = line;
         int keylen = eq;
         trim(&key, &keylen);
-        if (!streq_ci(key, keylen, "mode")) continue;
+        if (!streq_ci(key, keylen, "benchmark")) continue;
 
         const char *val = line + eq + 1;
         int vallen = l - eq - 1;
         trim(&val, &vallen);
         for (int i = 0; i < vallen; i++)
             if (val[i] == '#') { vallen = i; trim(&val, &vallen); break; }
-        if (!streq_ci(val, vallen, "bench")) continue;
+        if (streq_ci(val, vallen, "once")) return (int)(val - buf);
+    }
+    return -1;
+}
 
-        /* "bench" (5) -> "off" (3): overwrite, then close the 2-byte gap. */
-        int at = (int)(val - buf);
+int pfe_config_disable_bench(char *buf, int *io_n)
+{
+    if (!buf || !io_n || *io_n <= 0) return 0;
+    int n = *io_n, changed = 0;
+    int pos = skip_bom(buf, n), at;
+    while ((at = find_benchmark_once(buf, n, &pos)) >= 0) {
+        /* "once" (4) -> "off" (3): overwrite, then close the 1-byte gap. */
         buf[at] = 'o'; buf[at + 1] = 'f'; buf[at + 2] = 'f';
-        for (int i = at + 5; i < n; i++) buf[i - 2] = buf[i];
-        n -= 2;
-        pos -= 2;               /* the line we just shortened ends 2 earlier */
+        for (int i = at + 4; i < n; i++) buf[i - 1] = buf[i];
+        n--;
+        pos--;                  /* the line we just shortened ends 1 earlier */
         changed++;
     }
     *io_n = n;
