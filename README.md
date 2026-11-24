@@ -14,33 +14,28 @@ l2_prefetch=off
 
 ## ⚠️ Compatibility — read before flashing this
 
-This was built and hardware-verified on **exactly one physical unit**: a
-PS Vita devkit, **firmware 3.65**, with [psp2spl](https://github.com/SKGleba/psp2spl)'s
-TrustZone access running there via enso_ex. That is the only configuration
-this has ever actually run on.
+**The current code has not run on any hardware yet.** The underlying
+register-level technique — setting ACTLR/PL310 bits via
+[psp2spl](https://github.com/SKGleba/psp2spl)'s `EXEC_WITH_SP` secure-call
+gadget — was devkit-verified at firmware 3.65 (see "Why bother" below), but
+as of 2026-11-24 the *delivery* mechanism changed: instead of injecting a
+stub into an unreferenced padding region inside a different module
+(SYSMEM), it now maps a second, execute-only alias of our own module's own
+physical memory and jumps straight into that (see "How it works" below).
+That removes the one thing that was firmware/build-specific about the old
+approach — SYSMEM's internal padding offset — but it's a different
+mechanism and hasn't been tried on real hardware at all yet. Next test is
+a retail unit on firmware 3.60 via enso.
 
-Two separate things gate whether this will work at all on a different
-unit/firmware:
+One thing still gates whether this works at all on a given unit/firmware:
 
 1. **psp2spl's own firmware range.** Its secure-world init is gated to
    firmware `3.60`–`3.74`. Outside that range it won't even get as far as
    trying.
-2. **The exact secure-world write target.** This plugin pokes a small set
-   of stub bytes into an *unreferenced padding region* inside the SYSMEM
-   module's resident secure code, found by statically dumping and
-   disassembling that module on the one devkit above. Whether that same
-   padding region exists at the same offset on a different firmware build
-   of SYSMEM is **not verified** — psp2spl's firmware gate says TrustZone
-   access should work across 3.60–3.74, but this plugin's own write target
-   has only ever been checked on 3.65.
 
-In other words: getting *into* the secure world is believed to work across
-a firmware range; where this plugin then *writes* once it's there has only
-been confirmed safe on one specific build. If the padding assumption is
-wrong on your firmware, the write could land on live code instead of
-padding. Recommended if you're on anything other than 3.65: dump and check
-that region yourself first, or treat this as experimental on your unit and
-watch a USB/UART console on the first boot after installing it.
+Go cautiously until that's confirmed on more than one unit/firmware: start
+with both config keys `off`, confirm the plugin loads and exits cleanly,
+*then* flip one on and watch a USB/UART console on the first boot after.
 
 This also only re-applies on a **cold boot** — not on resume-from-sleep.
 Whether sleep/resume clears these bits on this hardware was never safely
@@ -119,18 +114,23 @@ one.
 
 ## How it works, briefly
 
-Uses psp2spl to get secure-world (TrustZone) code execution, then writes a
-tiny ARM32 stub (`MRC`/`ORR`/`MCR`/`BX` for ACTLR; a PL310 MMIO
-read-modify-write for `PREFETCH_CTRL`) into an unreferenced padding region
-inside SYSMEM's resident secure `.text`, flushes it to be I-fetchable, and
-executes it via psp2spl's `EXEC_WITH_SP` secure-call gadget — once per core
-for ACTLR, once for the shared PL310 controller. All of this runs fresh on
-every cold boot, driven by whatever the config file says that boot.
+Uses psp2spl to get secure-world (TrustZone) code execution. Each
+prefetcher's stub (`MRC`/`ORR`/`MCR`/`BX` for ACTLR; a PL310 MMIO
+read-modify-write for `PREFETCH_CTRL`) is plain compiled-in data in this
+module — nothing is written at runtime. To run one, the plugin resolves
+the physical address already backing it (`ksceKernelVAtoPA`), maps a
+second, execute-only alias of that same physical page
+(`SCE_KERNEL_MEMBLOCK_TYPE_KERNEL_RX`), and jumps straight into it via
+psp2spl's `EXEC_WITH_SP` secure-call gadget — once per core for ACTLR,
+once for the shared PL310 controller. All of this runs fresh on every
+cold boot, driven by whatever the config file says that boot.
 
 ## Credits
 
 None of this would have been possible without **[@SKGleba](https://github.com/SKGleba)**'s
 research into the Vita's lv0/TrustZone internals and the
 **[psp2spl](https://github.com/SKGleba/psp2spl)** library built on top of
-it — the secure-world code execution this plugin relies on entirely. Huge
-thanks for publishing both.
+it — the secure-world code execution this plugin relies on entirely. The
+current approach above (executing straight out of this module's own
+memory instead of injecting into another module's) was also his
+suggestion. Huge thanks for publishing both and for the help.

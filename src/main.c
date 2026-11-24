@@ -61,7 +61,14 @@ void *memset(void *dst, int c, unsigned int n)
 #define LOG_PATH    "ur0:data/prefetch_enabler.log"
 #define HOST_LOG    "host0:prefetch_enabler/boot.log"
 
-/* ACTLR set stub - 4 words at NS alias offset 0xCC. */
+/*
+ * ACTLR/PL310 set stubs - executed in place, through a fresh execute-only
+ * physical alias of wherever the module loader actually put them (see
+ * map_own_code_rx() below). Pure register/immediate ARM, no data or
+ * external symbol references - position-independent by construction, so
+ * it doesn't matter which virtual address they're fetched through, only
+ * that the physical bytes are reachable from secure-world execution.
+ */
 static const unsigned int actlr_set[4] = {
     0xEE110F30u,  /* MRC p15,0,r0,c1,c0,1 (read ACTLR) */
     0xE3800006u,  /* ORR r0,r0,#6          (set bits [1,2]) */
@@ -69,7 +76,6 @@ static const unsigned int actlr_set[4] = {
     0xE12FFF1Eu,  /* BX lr */
 };
 
-/* PL310 set stub - 9 words at NS alias offset 0xDC. */
 static const unsigned int pl310_set[9] = {
     0xE59F1018u,  /* LDR r1,[pc,#0x18]      ; r1 = PL310_BASE */
     0xE5910F60u,  /* LDR r0,[r1,#0xF60]     ; PREFETCH_CTRL */
@@ -82,13 +88,54 @@ static const unsigned int pl310_set[9] = {
     0x1A002000u,  /* literal: PL310_BASE */
 };
 
-#define STUB_PA      0x40188000u
-#define ACTLR_PG_OFF 0xCCu
-#define PL310_PG_OFF 0xDCu
-
 extern int splCl_smc(unsigned int a0, unsigned int a1, unsigned int a2,
                      unsigned int a3, unsigned int idx);
 #define SPLTZ_SMC_EXEC_WITH_SP 0x401u
+
+/*
+ * Maps a second, execute-only alias of the physical page already backing
+ * code_va - our own module's own already-loaded, already-coherent code -
+ * instead of injecting a stub into another module's memory. No write, no
+ * cache flush: the bytes at that PA are already correct and were already
+ * made I-fetchable by the ordinary module loader when we were loaded.
+ *
+ * Per SKGleba (2026-11-24): va2pa on your own code, map that PA as a
+ * kernel RX memblock, feed the result straight to EXEC_WITH_SP - no
+ * SPLx_TZS_GETMODSVA/module lookup needed for our own code at all, only
+ * for the stack (still sourced from SYSMEM's data segment below).
+ *
+ * Caller must keep the returned block alive until done executing through
+ * *out_exec_va, then free it.
+ */
+static SceUID map_own_code_rx(const void *code_va, void **out_exec_va)
+{
+    uintptr_t pa = 0;
+    if (ksceKernelVAtoPA(code_va, &pa) < 0) return -1;
+
+    unsigned int page_pa  = (unsigned int)pa & ~0xFFFu;
+    unsigned int page_off = (unsigned int)pa &  0xFFFu;
+
+    static const unsigned int rx_types[2] = {
+        SCE_KERNEL_MEMBLOCK_TYPE_KERNEL_RX,
+        SCE_KERNEL_MEMBLOCK_TYPE_KERNEL_TOOL_RX,
+    };
+    SceUID blk = -1;
+    void  *base = NULL;
+    for (int i = 0; i < 2; i++) {
+        SceKernelAllocMemBlockKernelOpt opt;
+        memset(&opt, 0, sizeof(opt));
+        opt.size  = (unsigned int)sizeof(opt);
+        opt.attr  = SCE_KERNEL_ALLOC_MEMBLOCK_ATTR_HAS_PADDR;
+        opt.paddr = page_pa;
+        blk = ksceKernelAllocMemBlock("pfe_rx", rx_types[i], 0x1000, &opt);
+        if (blk >= 0) break;
+    }
+    if (blk < 0) return blk;
+
+    ksceKernelGetMemBlockBase(blk, &base);
+    *out_exec_va = (void *)((unsigned int)base + page_off);
+    return blk;
+}
 
 static char g_log[1024];
 static int  g_log_len;
@@ -195,12 +242,12 @@ static void read_config(int *want_l1, int *want_l2)
 
 static int run_actlr_core(SceSize args, void *argp)
 {
-    unsigned int stub_sva = *(unsigned int *)argp;
+    unsigned int exec_va = *(unsigned int *)argp;
     unsigned int stack_sva = *((unsigned int *)argp + 1);
 
     unsigned int before = 0;
     __asm__ __volatile__("mrc p15, 0, %0, c1, c0, 1" : "=r"(before));
-    int r = splCl_smc(0, stack_sva, stub_sva, 0, SPLTZ_SMC_EXEC_WITH_SP);
+    int r = splCl_smc(0, stack_sva, exec_va, 0, SPLTZ_SMC_EXEC_WITH_SP);
     unsigned int after = 0;
     __asm__ __volatile__("mrc p15, 0, %0, c1, c0, 1" : "=r"(after));
 
@@ -234,73 +281,44 @@ int module_start(SceSize argc, const void *args)
     }
 
     {
-        unsigned int text_sva = 0, data_sva = 0;
-        SPLx_TZS_GETMODSVA(SPLTZ_MODINFO_SYSMEM, 0, 0, &text_sva);
+        unsigned int data_sva = 0;
         SPLx_TZS_GETMODSVA(SPLTZ_MODINFO_SYSMEM, 1, 0, &data_sva);
-        unsigned int actlr_stub_sva = text_sva + 0x140CCu;
-        unsigned int pl310_stub_sva = text_sva + 0x140DCu;
-        unsigned int stack_sva      = data_sva + 0x200u;
-        log_hex_line("sysmem_text ", text_sva);
+        unsigned int stack_sva = data_sva + 0x200u;
         log_hex_line("sysmem_data ", data_sva);
 
-        static const unsigned int types[3] = { 0x20100206u, 0x20100806u, 0x20108006u };
-        SceUID blk = -1;
-        void  *base = NULL;
-        for (int i = 0; i < 3; i++) {
-            SceKernelAllocMemBlockKernelOpt opt;
-            memset(&opt, 0, sizeof(opt));
-            opt.size  = (unsigned int)sizeof(opt);
-            opt.attr  = SCE_KERNEL_ALLOC_MEMBLOCK_ATTR_HAS_PADDR;
-            opt.paddr = STUB_PA;
-            blk = ksceKernelAllocMemBlock("pfe_stub", types[i], 0x1000, &opt);
-            if (blk >= 0) break;
-        }
-        if (blk < 0) { log_hex_line("stub alloc failed ", (unsigned int)blk); goto write_out; }
-        ksceKernelGetMemBlockBase(blk, &base);
-
         if (want_l1) {
-            volatile unsigned int *s = (volatile unsigned int *)((unsigned int)base + ACTLR_PG_OFF);
-            for (int i = 0; i < 4; i++) s[i] = actlr_set[i];
-        }
-        if (want_l2) {
-            volatile unsigned int *s = (volatile unsigned int *)((unsigned int)base + PL310_PG_OFF);
-            for (int i = 0; i < 9; i++) s[i] = pl310_set[i];
-        }
-
-        /* Two-line flush at +0xCC and +0xEC covers 0xC0-0xFF (both slots),
-         * regardless of which one was written. */
-        unsigned int sv = (unsigned int)base + ACTLR_PG_OFF;
-        for (int pass = 0; pass < 2; pass++) {
-            __asm__ __volatile__(
-                "mcr p15, 0, %0, c7, c11, 1\n\t"
-                "dsb\n\t"
-                "mcr p15, 0, %0, c7, c5,  1\n\t"
-                "dsb\n\t"
-                "isb"
-                : : "r"(sv) : "memory"
-            );
-            sv += 32u;
-        }
-        ksceKernelFreeMemBlock(blk);
-        log_line("stub written and flushed");
-
-        if (want_l1) {
-            static const int masks[4] = { 0x10000, 0x20000, 0x40000, 0x80000 };
-            unsigned int argp[2] = { actlr_stub_sva, stack_sva };
-            for (int i = 0; i < 4; i++) {
-                SceUID th = ksceKernelCreateThread("pfe_actlr", run_actlr_core,
-                                                   0x10, 0x2000, 0, masks[i], NULL);
-                if (th < 0) continue;
-                if (ksceKernelStartThread(th, sizeof(argp), argp) >= 0)
-                    ksceKernelWaitThreadEnd(th, NULL, NULL);
-                ksceKernelDeleteThread(th);
+            void *exec_va = NULL;
+            SceUID blk = map_own_code_rx(actlr_set, &exec_va);
+            if (blk < 0) {
+                log_hex_line("actlr rx map failed ", (unsigned int)blk);
+            } else {
+                log_hex_line("actlr exec_va ", (unsigned int)exec_va);
+                static const int masks[4] = { 0x10000, 0x20000, 0x40000, 0x80000 };
+                unsigned int argp[2] = { (unsigned int)exec_va, stack_sva };
+                for (int i = 0; i < 4; i++) {
+                    SceUID th = ksceKernelCreateThread("pfe_actlr", run_actlr_core,
+                                                       0x10, 0x2000, 0, masks[i], NULL);
+                    if (th < 0) continue;
+                    if (ksceKernelStartThread(th, sizeof(argp), argp) >= 0)
+                        ksceKernelWaitThreadEnd(th, NULL, NULL);
+                    ksceKernelDeleteThread(th);
+                }
+                ksceKernelFreeMemBlock(blk);
+                log_line("actlr: set on all cores");
             }
-            log_line("actlr: set on all cores");
         }
 
         if (want_l2) {
-            int r = splCl_smc(0, stack_sva, pl310_stub_sva, 0, SPLTZ_SMC_EXEC_WITH_SP);
-            log_hex_line("pl310 smc_ret ", (unsigned int)r);
+            void *exec_va = NULL;
+            SceUID blk = map_own_code_rx(pl310_set, &exec_va);
+            if (blk < 0) {
+                log_hex_line("pl310 rx map failed ", (unsigned int)blk);
+            } else {
+                log_hex_line("pl310 exec_va ", (unsigned int)exec_va);
+                int r = splCl_smc(0, stack_sva, (unsigned int)exec_va, 0, SPLTZ_SMC_EXEC_WITH_SP);
+                log_hex_line("pl310 smc_ret ", (unsigned int)r);
+                ksceKernelFreeMemBlock(blk);
+            }
         }
     }
 
