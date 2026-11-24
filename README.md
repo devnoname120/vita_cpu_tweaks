@@ -1,9 +1,11 @@
 # vita_cpu_tweaks
 
-A taiHEN kernel plugin that re-enables the PS Vita's Cortex-A9 and PL310
-hardware prefetchers, which Sony's `kernel_boot_loader` explicitly disables
-at every boot. Every prefetch-related register field gets its own key in a
-plain INI-style config file — no rebuilding, no runtime tool needed.
+A taiHEN kernel plugin that turns on the PS Vita's hardware data
+prefetchers. The firmware switches them off at every boot: the Cortex-A9's
+L2 prefetch hint and the PL310 L2 cache controller's data prefetch. With
+them on, memory reads that miss the cache get up to 2.5× faster. Every
+prefetch-related register field has its own key in a plain INI config file,
+so you never need to rebuild anything.
 
 ```ini
 enable = on                  # off | on | once
@@ -12,182 +14,203 @@ pl310.data_prefetch = on     # PL310 PREFETCH_CTRL bit 28
 pl310.prefetch_offset = 15   # PL310 PREFETCH_CTRL bits 4:0
 ```
 
-`enable = once` applies the settings for one boot: the plugin rewrites the
-line to `enable = off` before doing anything, so if that boot ever hangs, a
-plain power-cycle comes back without it. Plus `probe = once` for a
-read-only diagnostic log and `benchmark = once` for an on-device benchmark
-that reboots when it is done. See
-[`cpu_tweaks.example.ini`](cpu_tweaks.example.ini) for every key,
-each documented right above it.
+## Performance
 
-## ⚠️ Compatibility — read before flashing this
+These numbers come from the plugin's own benchmark (`benchmark = once`) on a
+retail Vita. The CPU ran at 500 MHz, with bus 222, GPU 222 and GPU crossbar
+166 MHz. The benchmark runs during boot, on an otherwise idle system, as
+three interleaved rounds. Two separate boots agree to a median of 0.05%.
 
-**Verified on exactly one configuration: a retail PS Vita on firmware 3.60
-via enso** (2026-11-24). The example config applies there — ACTLR
-`0x149 -> 0x14B` on all four cores, PL310 `PREFETCH_CTRL`
-`0x21000000 -> 0x3100000F` — reproduced across many consecutive boots.
-Nothing else has been tried: no other retail firmware, and no devkit,
-testkit or debug unit. The underlying register-level technique was
-separately devkit-verified at firmware 3.65 (see "Why bother" below), but
-by a *different* delivery mechanism that turned out not to port to retail;
-see `analysis/ebadmovp-investigation/README.md` for what this does instead
-and why.
-
-Two things gate whether it works at all on a given unit/firmware:
-
-1. **psp2spl's own firmware range.** Its secure-world init is gated to
-   firmware `3.60`–`3.74`. Outside that range it won't even get as far as
-   trying. This is the hard ceiling: a 3.65 or 3.74 unit is plausible, a
-   3.75+ unit is not.
-2. **The secure-world layout.** No address is hardcoded — the TZ region
-   bounds and secure page-table roots are read out of psp2spl's own
-   resolved layout, and the scratch page, stub slot and page-table write
-   window are each found by walking the live secure tables at runtime. They
-   have to be: they move between boots on a *single* unit, let alone between
-   firmwares. Every step is gated, so a layout this doesn't fit aborts with
-   a logged reason instead of doing something unpredictable.
-
-Go cautiously on any configuration other than retail 3.60: start with
-`probe = once` (read-only), confirm the log looks sane, then `enable = once`,
-and only switch to `enable = on` once a `once` boot has worked. `on` has no
-safety net: if it ever hung, it would hang on every boot until the plugin's
-line is removed from `config.txt`.
-
-Waking from sleep: the secure world resets the cores and the L2 controller
-on wake (verified: right after wake ACTLR reads `0x149` and PL310
-`0x21000000` again), so the plugin re-applies the settings after every
-wake, following psp2spl's own sleep/resume protocol (tear down before
-sleep, re-initialise with `RESET` on wake). Verified on retail 3.60.
-
-## Why bother
-
-Measured on the retail unit itself with the plugin's built-in benchmark
-(`benchmark = once`, `benchmark.timing = boot`): independent strided loads over
-memory that is in no cache, CPU at 500 MHz with bus 222 / GPU 222 /
-crossbar 166 MHz (the clocks games use), run during boot on a near-idle
-system, three interleaved rounds. Two separate boots agree to a median of
-0.05%. Cycles per load:
+**Strided loads over memory that is in no cache**, cycles per load:
 
 | stride (bytes) | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 |
 |---|---|---|---|---|---|---|---|---|
 | stock | 16.6 | 29.6 | 35.0 | 47.4 | 47.4 | 47.6 | 48.0 | 49.4 |
 | ACTLR hint only | 9.9 | 18.0 | 21.1 | 37.0 | 37.5 | 38.9 | 40.7 | 44.4 |
-| PL310 only, offset 15 | 7.2 | 11.0 | 14.1 | 20.7 | 20.4 | 27.7 | 36.1 | 44.9 |
-| **hint + PL310 offset 15** | **6.6** | **10.0** | **14.0** | **22.7** | **23.3** | **27.7** | **36.6** | **41.0** |
+| PL310 prefetch only, offset 15 | 7.2 | 11.0 | 14.1 | 20.7 | 20.4 | 27.7 | 36.1 | 44.9 |
+| **both, offset 15 (default config)** | **6.6** | **10.0** | **14.0** | **22.7** | **23.3** | **27.7** | **36.6** | **41.0** |
 | change vs stock | −60% | −66% | −60% | −52% | −51% | −42% | −24% | −17% |
 
-Random (pointer-chasing) access over 2 MiB, which can't be prefetched, still
-gains a little: 33.8 → 31.3 cycles per load (−7%).
+**Choosing the PL310 prefetch offset**: same test, ACTLR hint on, PL310
+data prefetch on:
 
-Takeaways:
-- **ACTLR bit 1 ("L2 prefetch hint") is the only ACTLR bit that matters.**
-  Bit 2, the L1 data-side prefetcher, measured to do nothing at all on this
-  chip, alone or combined; the example config leaves it alone.
-- **The PL310 prefetch offset is what makes L2 prefetch pay.** At the
-  firmware's offset 0 it adds nothing over the hint and slows large strides;
-  at 15 it is the biggest single win. 7 is slightly better below 16-byte
-  strides, 31 better above 128; 15 is the best all-rounder.
-- ACTLR "allocate in one way only" and PL310 prefetch drop make no
+| offset | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 9.9 | 18.1 | 21.4 | 36.0 | 41.1 | 42.1 | 43.5 | 46.3 |
+| 7 | **6.4** | **9.4** | **13.4** | **22.2** | 26.9 | 35.7 | 38.0 | 46.0 |
+| **15** | 6.6 | 10.0 | 14.0 | 22.7 | **23.3** | 27.7 | 36.6 | 41.0 |
+| 31 | 7.1 | 11.1 | 15.0 | 24.7 | 24.9 | **25.2** | **30.0** | **38.5** |
+
+**Random (pointer-chasing) access** can't be predicted, but it still gains a
+little. Over a 2 MiB working set, cycles per load drop from 33.8 (stock) to
+31.3 (default config), or 29.8 with offset 0.
+
+What this means:
+
+- **ACTLR bit 1 (L2 prefetch hint) is the only ACTLR bit that matters.**
+  Bit 2, the L1 data-side prefetcher, makes no difference on this chip,
+  alone or combined with the others.
+- **The prefetch offset is what makes PL310 prefetch pay off.** At offset 0
+  it adds nothing over the hint and slows large strides. 15 is the best
+  all-rounder: 7 is slightly better for strides under 64 bytes, and 31 is
+  better for 128 bytes and up.
+- ACTLR "allocate in one way only" and PL310 "prefetch drop" make no
   measurable difference either way.
-- Cache hits are unchanged (L1 4 cycles, L2 ~21–25). Beyond that small
-  random-access gain, this won't move the needle on pointer-chasing workloads (object graphs, VM dispatch,
-  tree/BSP traversal) — it helps roughly sequential or strided access
-  (streaming decode, copies, linear scans).
+- Cache hits are unchanged (L1 4 cycles, L2 about 21–25). The gain is for
+  roughly sequential or strided access: streaming decode, copies, linear
+  scans. Pointer-heavy work like object graphs, VM dispatch or tree
+  traversal only sees the small random-access gain.
 
-The full tables, the ~330 MHz runs and the method are in
-`analysis/ebadmovp-investigation/README.md`.
+## Compatibility
+
+**Tested on a retail PS Vita on firmware 3.60 with enso.** The default config
+changes ACTLR from `0x149` to `0x14B` on all four cores and PL310
+`PREFETCH_CTRL` from `0x21000000` to `0x3100000F`. This holds across boots
+and across sleep/wake.
+
+- **Firmware 3.60–3.74 only.** The plugin relies on
+  [psp2spl](https://github.com/SKGleba/psp2spl) for secure-world (TrustZone)
+  access, and psp2spl only supports that range. Other firmwares inside the
+  range are untested.
+- **No hardcoded addresses.** Every secure-world address is read from the
+  live secure page tables at boot, and every step is checked. If something
+  doesn't match what the plugin expects, it aborts that step and logs the
+  reason instead of guessing.
+- **Sleep/wake.** Waking from sleep resets the cores and the L2 controller
+  to the firmware's values. The plugin re-applies its settings after every
+  wake.
+
+On anything other than retail 3.60, start with `enable = once` (see below)
+before switching to `enable = on`.
 
 ## Installing
 
-1. Copy `cpu_tweaks.skprx` (built below, or from a
-   [release](../../releases)) to `ur0:tai/cpu_tweaks.skprx`.
-2. Add a line for it under `*KERNEL` in `ur0:tai/config.txt`:
+1. Copy `cpu_tweaks.skprx` ([built as below](#building)) to
+   `ur0:tai/cpu_tweaks.skprx`.
+2. Add it under `*KERNEL` in `ur0:tai/config.txt`:
    ```
    ur0:tai/cpu_tweaks.skprx
    ```
 3. Copy [`cpu_tweaks.example.ini`](cpu_tweaks.example.ini) to
-   `ur0:tai/cpu_tweaks.ini`. It ships with `enable = on` and the
-   measured-best register values filled in, so they apply at every boot.
-   For a first boot with a safety net, set `enable = once` instead.
-4. Reboot. `config.txt` is only read at boot, and this plugin only rereads
-   its own config file at boot too — so any change to either file needs
-   one more reboot to take effect.
+   `ur0:tai/cpu_tweaks.ini`. It ships with `enable = on` and the best
+   measured values from the tables above.
+4. Reboot. The plugin reads its config only at boot, so every config change
+   needs a reboot to take effect.
 
-**Go cautiously the first time:** start with everything off, confirm the
-plugin loads and exits cleanly (check `ur0:data/cpu_tweaks.log` after
-boot — it should say `nothing to do, exiting cleanly`), then
-`probe = once`, then `enable = once`, *then* `enable = on`. Keep a way to get back into `config.txt` (recovery
-menu, another kernel plugin, etc.) in case anything about your specific
-unit/firmware doesn't match what this was built against.
+To uninstall, remove the plugin's line from `config.txt` and reboot.
 
-To disable the plugin entirely, just comment out or remove its line in
-`config.txt` — ordinary taiHEN usage.
+## Configuration
+
+`ur0:tai/cpu_tweaks.ini` holds one `key = value` per line, and `#` starts a
+comment. Every key is documented right above it in
+[`cpu_tweaks.example.ini`](cpu_tweaks.example.ini).
+
+| key | values | what it does |
+|---|---|---|
+| `enable` | `off` · `on` · `once` | Apply the register settings at boot. `once` applies them for the next boot only, then switches itself back to `off`. |
+| `probe` | `off` · `once` | Log the CPU and PL310 IDs and the secure page-table layout. Read-only. |
+| `benchmark` | `off` · `once` | Run the benchmark at the next boot, then reboot. |
+| `log` | `on` · `off` | `off`: write the log only when something fails. |
+| `actlr.*`, `pl310.*` | `on` · `off` · `keep` | One key per register field. `keep`, or leaving the key out, leaves the firmware's value alone. |
+| `pl310.prefetch_offset` | `0`–`7`, `15`, `23`, `31`, `keep` | How many cache lines ahead the L2 prefetches. |
+| `benchmark.clocks` | `max` · `keep` | Raise all clocks to their maximum for the benchmark. |
+| `benchmark.timing` | `boot` · `home` | Run the benchmark during boot, or 30 s after boot. |
+
+Two settings are accepted but marked **do not use** in the example config,
+because they trigger known hardware bugs in this PL310 revision (r3p1-50rel0):
+
+- `pl310.prefetch_offset = 23`: ARM erratum 765569. The prefetcher can cross
+  a 4 KB page boundary.
+- `pl310.double_linefill = on`: ARM erratum 752271. Can corrupt data.
+
+### `once` is a safety net
+
+Before it touches any register, the plugin rewrites every `once` in its
+config file to `off` and reads the file back to confirm. If a `once` boot
+ever hangs, a plain power-cycle comes back without the setting. If the
+plugin can't confirm the rewrite, it does nothing that boot.
+
+`enable = on` has no such safety net: a setting that hung the system would
+hang it on every boot until the plugin's line is removed from `config.txt`.
+That is why `once` is the right first step on an untested unit.
+
+### Logs
+
+- `ur0:data/cpu_tweaks.log` is rewritten at every boot. It shows the
+  register values before and after, or why a step was skipped.
+- `ur0:data/cpu_tweaks_bench.log` holds the results of `benchmark = once`.
+
+## Running the benchmark yourself
+
+Set `benchmark = once` and reboot. With `benchmark.timing = boot` (the
+default), the boot pauses for about 35 seconds before the home screen
+while the benchmark runs. The plugin then restores the clocks and registers
+and reboots by itself. The results are in `ur0:data/cpu_tweaks_bench.log`.
+The benchmark runs whatever `enable` is set to, and it ignores the register
+keys: it tests its own fixed set of combinations, the ones in the tables
+above.
 
 ## Building
 
-Needs a Docker image providing vitasdk (the included `Dockerfile` pins one
-with `arm-vita-eabi-gcc` 10.3.0, known-good against this code):
+You need Docker. The included `Dockerfile` pins a vitasdk image with
+`arm-vita-eabi-gcc` 10.3.0:
 
 ```bash
 docker build -t vita_cpu_tweaks .
+```
+
+```bash
 docker run --rm -v "$PWD":/work vita_cpu_tweaks
 ```
 
-`build/cpu_tweaks.skprx` lands on your own filesystem via the volume
-mount. Rerun the `docker run` line after any source change — no need to
-rebuild the image itself.
+The plugin ends up in `build/cpu_tweaks.skprx`. After a source change, rerun
+only the `docker run` line.
 
 The build links against a vendored copy of psp2spl's `splib` (prebuilt
-static libs + headers, see
-[`third_party/psp2spl/NOTICE.md`](third_party/psp2spl/NOTICE.md)) so no
-other setup is needed. If you'd rather build `splib` yourself from
-[upstream](https://github.com/SKGleba/psp2spl) — it needs a MeP
-cross-toolchain for the F00D coprocessor payload that isn't publicly
-packaged anywhere, so this is a nontrivial undertaking on its own — point
-`cmake -DPSP2SPL_DIR=/path/to/your/build` at a directory with the same
-`include/` + `lib/{libspl.a,libsplCFK.a}` layout to override the vendored
-one.
+static libs and headers, see
+[`third_party/psp2spl/NOTICE.md`](third_party/psp2spl/NOTICE.md)), so it
+needs no other setup. Building `splib` yourself from
+[upstream](https://github.com/SKGleba/psp2spl) needs a MeP cross-toolchain
+for the F00D payload, which isn't publicly packaged. To use your own build
+anyway, pass `cmake -DPSP2SPL_DIR=/path/to/build`, pointing at a directory
+with `include/` and `lib/{libspl.a,libsplCFK.a}`.
 
-## How it works, briefly
+Host-side tests for the config parser are in `src/tests/run.sh`.
 
-Uses psp2spl for secure-world (TrustZone) access. The two prefetchers need
-quite different amounts of machinery.
+## How it works
 
-**PL310** is memory-mapped, not a cp15 register, so no code execution is
-needed at all: one secure read-modify-write sets `PREFETCH_CTRL` bit 28.
-The controller is shared, so this happens once.
+Both registers can only be written from the secure world, which the plugin
+reaches through psp2spl.
 
-**ACTLR** is a cp15 register, and only an `MCR` executing in secure PL1 can
-write it — once per core. That needs a `func` pointer that is executable
-under the *secure* page tables, and on retail 3.60 nothing non-secure can
-produce one directly: no secure page is both writable and executable, the
-DDR firewall silently drops non-secure writes aimed into the TrustZone
-region, and it also blocks secure accesses pointed *out* of that region, so
-the module's own memory cannot be used as the stub's home either. What does
-work is to give secure world a new mapping instead of new contents: one
-secure write adds a single L2 descriptor mapping a previously-unmapped
-secure VA to an unused physical page inside the TZ region, as Normal
-Non-Cacheable, PL1-RW and executable. Non-cacheable is load-bearing — it
-removes every cache-maintenance concern, including PL310's
-security-tagged lines — and a VA that was invalid before cannot be holding
-a stale TLB entry. A 9-word stub (read ACTLR, clear and set masks loaded
-from the same page, write ACTLR) is then written with secure writes, read back through the new mapping as a gate, executed per core via
-psp2spl's `EXEC_WITH_SP`, and the scratch page and descriptor are both
-cleaned up afterwards.
+**PL310** is memory-mapped, so a single secure read-modify-write of
+`PREFETCH_CTRL` (`0x1A002F60`) is enough. The controller is shared by all
+cores, so this happens once.
 
-All of this runs fresh on every cold boot, driven by whatever the config
-file says that boot, and every address involved is derived from the live
-secure page tables at runtime. The full derivation, including the dead ends
-and how each wall was established, is in
-`analysis/ebadmovp-investigation/README.md`.
+**ACTLR** is a cp15 register. Only an `MCR` instruction running in secure PL1
+can write it, and it has to run on each core. No secure page is both
+writable and executable, and the DDR firewall keeps the secure world from
+reaching the plugin's own non-secure memory. So the plugin gives the secure
+world a new mapping:
+
+1. It picks an unused physical page inside the TrustZone region and an
+   unmapped secure virtual address.
+2. One secure write adds a single L2 page-table descriptor that maps the
+   page there as Normal non-cacheable, PL1 read-write and executable.
+   Non-cacheable removes every cache-maintenance concern. A previously
+   unmapped address can't have a stale TLB entry.
+3. It writes a 9-word stub into the page (read ACTLR, apply the clear and
+   set masks stored next to it, write ACTLR back) and reads it back
+   through the new mapping to check it.
+4. It runs the stub on each core with psp2spl's `EXEC_WITH_SP`.
+5. It removes the stub and the descriptor.
+
+All of this runs at every boot, using whatever the config file says that
+boot. It runs again after every wake from sleep, following psp2spl's
+sleep/resume protocol.
 
 ## Credits
 
-None of this would have been possible without **[@SKGleba](https://github.com/SKGleba)**'s
-research into the Vita's lv0/TrustZone internals and the
-**[psp2spl](https://github.com/SKGleba/psp2spl)** library built on top of
-it — the secure-world access this plugin relies on entirely. His suggestion
-to execute out of our own memory rather than inject into another module's
-is what led to the current mapping-injection approach, after the firewall
-ruled out the literal version of it. Huge thanks for publishing both and
-for the help.
+This plugin depends entirely on **[@SKGleba](https://github.com/SKGleba)**'s
+research into the Vita's lv0/TrustZone internals and on his
+**[psp2spl](https://github.com/SKGleba/psp2spl)** library, which provides the
+secure-world access. Thanks for publishing both, and for the help.
