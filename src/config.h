@@ -76,7 +76,7 @@ void pfe_config_masks(const struct pfe_config *cfg, struct pfe_masks *m);
 
 /* 0-7, 15, 23 and 31 are the L2C-310 TRM's valid prefetch offsets. 23 is
  * valid but hits ARM errata 765569 on this PL310 revision - accepted, and
- * warned about in the example config and the log. */
+ * warned about in the shipped config and the log. */
 int pfe_l2_offset_valid(int v);
 
 /*

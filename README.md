@@ -91,8 +91,8 @@ before switching to `enable = on`.
    ```
    ur0:tai/cpu_tweaks.skprx
    ```
-3. Copy [`cpu_tweaks.example.ini`](cpu_tweaks.example.ini) to
-   `ur0:tai/cpu_tweaks.ini`. It ships with `enable = on` and the best
+3. Copy [`cpu_tweaks.ini`](cpu_tweaks.ini) to `ur0:tai/`, next to the plugin.
+   It ships with `enable = on` and the best
    measured values from the tables above.
 4. Reboot. The plugin reads its config only at boot, so every config change
    needs a reboot to take effect.
@@ -103,7 +103,7 @@ To uninstall, remove the plugin's line from `config.txt` and reboot.
 
 `ur0:tai/cpu_tweaks.ini` holds one `key = value` per line, and `#` starts a
 comment. Every key is documented right above it in
-[`cpu_tweaks.example.ini`](cpu_tweaks.example.ini).
+[`cpu_tweaks.ini`](cpu_tweaks.ini).
 
 | key | values | what it does |
 |---|---|---|
@@ -116,7 +116,7 @@ comment. Every key is documented right above it in
 | `benchmark.clocks` | `max` · `keep` | Raise all clocks to their maximum for the benchmark. |
 | `benchmark.timing` | `boot` · `home` | Run the benchmark during boot, or 30 s after boot. |
 
-Two settings are accepted but marked **do not use** in the example config,
+Two settings are accepted but marked **do not use** in the shipped config,
 because they trigger known hardware bugs in this PL310 revision (r3p1-50rel0):
 
 - `pl310.prefetch_offset = 23`: ARM erratum 765569. The prefetcher can cross

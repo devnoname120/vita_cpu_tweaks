@@ -249,8 +249,8 @@ int main(void)
 
     /* The shipped example file must actually parse, every line recognised. */
     {
-        FILE *f = fopen("cpu_tweaks.example.ini", "rb");
-        if (!f) f = fopen("../cpu_tweaks.example.ini", "rb");
+        FILE *f = fopen("cpu_tweaks.ini", "rb");
+        if (!f) f = fopen("../cpu_tweaks.ini", "rb");
         if (!f) {
             printf("FAIL %-48s cannot open example config\n", "example file");
             failures++;

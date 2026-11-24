@@ -6,7 +6,7 @@
  * prefetchers at boot. This plugin sets the prefetch-related fields of the
  * A9's ACTLR and the PL310's PREFETCH_CTRL as its config file says:
  *
- *     ur0:tai/cpu_tweaks.ini      (documented: cpu_tweaks.example.ini)
+ *     ur0:tai/cpu_tweaks.ini      (documented: cpu_tweaks.ini in the repo)
  *
  *     enable = off | on | once
  *     actlr.l2_prefetch_hint = on

@@ -21,7 +21,7 @@ stage=dist/for-testing
 rm -rf "$stage"
 mkdir -p "$stage"
 cp "$skprx" "$stage/cpu_tweaks.skprx"
-cp cpu_tweaks.example.ini "$stage/cpu_tweaks.ini"
+cp cpu_tweaks.ini "$stage/"
 sed -e "s/^build:  .*/build:   $commit/" \
     -e "s/^sha256: .*/sha256:  $sum/" \
     docs/for-testers.md > "$stage/README-FOR-TESTERS.md"
