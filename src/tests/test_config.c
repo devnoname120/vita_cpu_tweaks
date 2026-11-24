@@ -181,6 +181,14 @@ int main(void)
     pfe_config_masks(&c, &m);
     expect_hex("offset 0 still clears the field", m.pl310_clear, 0x1F);
 
+    /* --- log --- */
+    parse("", &c);              expect("log default on", c.log, 1);
+    parse("log = off\r\n", &c); expect("log off", c.log, 0);
+    parse("log = on\n", &c);    expect("log on", c.log, 1);
+    parse("log = no\n", &c);    expect("log garbage => stays on", c.log, 1);
+    expect("log garbage counted", ignored_of("log = no\n"), 1);
+    expect("log.x is not log", ignored_of("log.x = off\n"), 1);
+
     /* --- benchmark.clocks --- */
     parse("benchmark.clocks=keep\n", &c);  expect("benchmark.clocks keep", c.bench_clocks_max, 0);
     parse("benchmark.clocks=max\n", &c);   expect("benchmark.clocks max", c.bench_clocks_max, 1);

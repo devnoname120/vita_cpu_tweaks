@@ -36,9 +36,8 @@
  * PLEASE READ THE "Compatibility" SECTION THERE BEFORE FLASHING THIS ONTO
  * A UNIT WHOSE FIRMWARE WASN'T ALREADY CONFIRMED.
  *
- * Writes a plain-text log to ur0:data/cpu_tweaks.log every boot, plus
- * a best-effort copy to host0:cpu_tweaks/boot.log when a DECI4p host
- * happens to be attached (debugging convenience only).
+ * Writes a plain-text log to ur0:data/cpu_tweaks.log every boot it runs
+ * (log = on, the default), or only when something goes wrong (log = off).
  */
 #include <psp2kern/kernel/modulemgr.h>
 #include <psp2kern/kernel/threadmgr.h>
@@ -70,7 +69,6 @@ void *memset(void *dst, int c, unsigned int n)
  * by a normal boot, which - with self_disable=no - would overwrite LOG_PATH. */
 #define BENCH_LOG_PATH "ur0:data/cpu_tweaks_bench.log"
 #define LOG_PATH    "ur0:data/cpu_tweaks.log"
-#define HOST_LOG    "host0:cpu_tweaks/boot.log"
 
 #define TAI_CONFIG_PATH   "ur0:tai/config.txt"
 #define SELF_SKPRX_NEEDLE "cpu_tweaks.skprx"
@@ -144,11 +142,42 @@ extern int SPLx_TZS_WRITE32(unsigned int sva, unsigned int val);
 static char g_log[131072];
 static int  g_log_len;
 
+/*
+ * log = off: nothing is written to storage on a clean boot. The log still
+ * accumulates in memory, and if any line reports a problem (see
+ * note_problem) it is written anyway at the end, so an abort or a bad config
+ * line is never silent. Benchmark results always get their own file.
+ */
+static int g_log_to_disk = 1;
+static int g_log_problem;
+
+static int contains_word(const char *hay, const char *needle)
+{
+    for (int i = 0; hay[i]; i++) {
+        int j = 0;
+        while (needle[j] && hay[i + j] == needle[j]) j++;
+        if (!needle[j]) return 1;
+    }
+    return 0;
+}
+
+/* Every failure, abort or warning the plugin logs uses one of these words. */
+static void note_problem(const char *s)
+{
+    static const char *const words[] = {
+        "abort", "FAIL", "fail", "NOT ", "refused", "WARNING", "IGNORED",
+        "TOO LARGE", "not found", "could not",
+    };
+    for (unsigned i = 0; i < sizeof(words) / sizeof(words[0]); i++)
+        if (contains_word(s, words[i])) { g_log_problem = 1; return; }
+}
+
 /* Pure buffer append, no ksceDebugPrintf call - safe to use from inside
  * kprintf_capture_handler() below, which LOG()/log_line() are not (they'd
  * re-enter that handler through ksceDebugPrintf forever). */
 static void append_log(const char *s)
 {
+    note_problem(s);
     int n = 0;
     while (s[n] && g_log_len + n < (int)sizeof(g_log) - 2) n++;
     for (int i = 0; i < n; i++) g_log[g_log_len++] = s[i];
@@ -171,19 +200,27 @@ static void log_line(const char *s)
  * up to the last checkpoint survives on disk instead of being lost with
  * whatever never made it to a final write.
  */
-static void flush_log_to_disk(void)
+static void write_log_file(void)
 {
     SceUID fd = ksceIoOpen(LOG_PATH, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
     if (fd >= 0) {
         ksceIoWrite(fd, g_log, (SceSize)g_log_len);
         ksceIoClose(fd);
     }
-    ksceIoMkdir("host0:cpu_tweaks", 0777);
-    SceUID hfd = ksceIoOpen(HOST_LOG, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
-    if (hfd >= 0) {
-        ksceIoWrite(hfd, g_log, (SceSize)g_log_len);
-        ksceIoClose(hfd);
-    }
+}
+
+/* Checkpoint write: only when logging is on. With log = off the final
+ * write_out decides, from g_log_problem, whether anything is written. */
+static void flush_log_to_disk(void)
+{
+    if (g_log_to_disk) write_log_file();
+}
+
+/* The last write of a run: always with log = on, and with log = off only
+ * when something went wrong. */
+static void final_log_write(void)
+{
+    if (g_log_to_disk || g_log_problem) write_log_file();
 }
 
 static int contains(const char *hay, const char *needle)
@@ -419,9 +456,10 @@ static void read_config(struct pfe_config *cfg)
     log_hex_line("config: bytes parsed ", (unsigned int)n);
     static const char *const tri[] = { "keep", "on", "off" };
     char line[96];
-    snprintf(line, sizeof(line), "config: enable=%s probe=%s benchmark=%s self_disable=%s",
+    snprintf(line, sizeof(line), "config: enable=%s probe=%s benchmark=%s self_disable=%s log=%s",
              cfg->enable ? "on" : "off", cfg->probe ? "on" : "off",
-             cfg->bench ? "once" : "off", cfg->self_disable ? "yes" : "no");
+             cfg->bench ? "once" : "off", cfg->self_disable ? "yes" : "no",
+             cfg->log ? "on" : "off");
     log_line(line);
     for (int i = 0; i < PFE_ACTLR_NFIELDS; i++) {
         snprintf(line, sizeof(line), "config: %s=%s",
@@ -1572,7 +1610,7 @@ static int bench_main_thread(SceSize args, void *argp)
     probe_cpu_regs();
     log_line("==== vita_cpu_tweaks bench done ====");
     save_bench_log();
-    flush_log_to_disk();
+    final_log_write();
     bench_reboot();
     return 0;
 }
@@ -1591,6 +1629,7 @@ int module_start(SceSize argc, const void *args)
      */
     struct pfe_config cfg;
     read_config(&cfg);
+    g_log_to_disk = cfg.log;
 
     if (cfg.self_disable) {
         const char *disable_reason = "";
@@ -1715,7 +1754,7 @@ int module_start(SceSize argc, const void *args)
     log_line("==== vita_cpu_tweaks boot done ====");
 
 write_out:
-    flush_log_to_disk();
+    final_log_write();
     return SCE_KERNEL_START_SUCCESS;
 }
 

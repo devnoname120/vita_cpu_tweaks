@@ -47,6 +47,7 @@ struct pfe_config {
     int probe;                        /* probe: read-only recon, no secure writes */
     int bench;                        /* benchmark = once: one-shot run, then reboot */
     int self_disable;                 /* 1 unless self_disable=no */
+    int log;                          /* log: 1 = on (default), 0 = off */
     int actlr[PFE_ACTLR_NFIELDS];     /* enum pfe_tri, same order as pfe_actlr_fields */
     int pl310[PFE_PL310_NFIELDS];     /* enum pfe_tri, same order as pfe_pl310_fields */
     int pl310_offset;                 /* -1 = keep, else 0-7, 15, 23 or 31 */

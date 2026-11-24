@@ -140,6 +140,8 @@ static void apply_key(struct pfe_config *out, const char *key, int keylen,
 
     if (streq_ci(key, keylen, "enable")) {
         set_onoff(&out->enable, val, vallen, &out->ignored);
+    } else if (streq_ci(key, keylen, "log")) {
+        set_onoff(&out->log, val, vallen, &out->ignored);
     } else if (streq_ci(key, keylen, "probe")) {
         set_onoff(&out->probe, val, vallen, &out->ignored);
     } else if (streq_ci(key, keylen, "benchmark")) {
@@ -175,6 +177,7 @@ void pfe_parse_config(const char *buf, int n, struct pfe_config *out)
     out->probe = 0;
     out->bench = 0;
     out->self_disable = 1;
+    out->log = 1;
     for (int i = 0; i < PFE_ACTLR_NFIELDS; i++) out->actlr[i] = PFE_KEEP;
     for (int i = 0; i < PFE_PL310_NFIELDS; i++) out->pl310[i] = PFE_KEEP;
     out->pl310_offset = -1;
