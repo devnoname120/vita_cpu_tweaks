@@ -69,6 +69,13 @@ void pfe_bench_pmu_enable(void)
     __asm__ __volatile__("isb");
 }
 
+void pfe_bench_pmu_disable(void)
+{
+    /* PMCNTENCLR.C: stop the cycle counter again; PMCR is left as found. */
+    __asm__ __volatile__("mcr p15, 0, %0, c9, c12, 2" :: "r"(1u << 31));
+    __asm__ __volatile__("isb");
+}
+
 static inline unsigned int ccnt(void)
 {
     unsigned int v;

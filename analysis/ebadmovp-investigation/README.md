@@ -160,6 +160,60 @@ That splits the two knobs:
   kind the 3.65 devkit's `stride/` harness provided, which does not exist in
   this repo. Do not present the AOW clear as a speed-up until it is measured.
 
+  **Measured since (boots 33-35): it makes no difference either way** - see
+  the next bullet. Leave it at `keep`.
+
+* **Benchmark results (boots 33-35, `bench=on`).** `src/bench.c` runs two
+  tests per configuration ("leg"), timed in PMU cycles on a core-0-pinned
+  thread: a dependent-load *chase* through a random cycle of lines in a
+  4K..2M working set (latency and effective cache capacity), and a
+  single-pass *stride* walk over 2 MiB that has just been evicted by reading
+  the other 2 MiB twice (what prefetchers act on). Ten legs, each fully
+  specifying ACTLR bits 1/2/8 and PL310 data prefetch + offset, first leg
+  repeated last. Tables: `captures/boot33_bench_table.txt`,
+  `boot34_bench_table.txt` (both at boot, ~330 MHz, agree within 1-2%) and
+  `boot35_bench_table.txt` (same suite with the shell running - noisier,
+  same ranking). Cycles per load, boot 33:
+
+  | leg | stride 4 | 16 | 32 | 64 | 128 | 256 | chase 2M |
+  |---|---|---|---|---|---|---|---|
+  | firmware default | 12.7 | 27.8 | 31.4 | 31.8 | 31.7 | 32.2 | 31.6 |
+  | AOW cleared | 12.7 | 27.9 | 31.2 | 31.4 | 31.4 | 32.2 | 31.5 |
+  | ACTLR prefetch (bits 1+2) | 7.9 | 17.1 | 27.3 | 27.6 | 28.1 | 29.1 | 31.3 |
+  | PL310 prefetch, offset 0 | 8.2 | 22.2 | 32.4 | 34.9 | 34.9 | 35.1 | 28.7 |
+  | both, offset 0 | 7.9 | 17.0 | 27.2 | 29.5 | 29.9 | 31.2 | 28.6 |
+  | both, offset 7 | 6.2 | 11.6 | 16.5 | 20.3 | 26.9 | 28.6 | 29.3 |
+  | both, offset 15 | 6.3 | 12.1 | 17.1 | 17.4 | 21.0 | 27.3 | 29.7 |
+  | both, offset 31 | 6.6 | 12.7 | 18.5 | 18.7 | 19.0 | 22.4 | 30.0 |
+
+  * **AOW (ACTLR bit 8) is neutral.** The chase holds 4 cycles out to a
+    32 KiB working set with the bit set or cleared, so all of L1 is usable
+    either way; it evidently only matters for the memory-copy case its TRM
+    description names. Strides do not move either.
+  * **PL310 data prefetch at the firmware's offset 0 is close to useless**:
+    nothing over ACTLR prefetch alone, and ~10% *slower* on its own at
+    strides of 64 bytes and up. The offset is what makes it pay.
+  * **ACTLR prefetch + PL310 prefetch at offset 15 is the best all-round
+    setting**: 35-55% fewer cycles per load for strides up to 128 bytes, and
+    the random 2 MiB chase still slightly faster than stock. Offset 31 wins
+    only at 128-256 byte strides; offset 23 was not tested (errata 765569).
+  * Cache geometry it shows: L1 hit 4 cycles; PL310 hit ~21 cycles at 64 KiB,
+    ~25 at 256-512 KiB (TLB reach); AUX_CTRL `0x60090001` = 16 ways x 64 KiB
+    = 1 MiB L2.
+
+* **Never hold up boot for seconds: it crashes SceShell (boots 33-34).** The
+  first two benchmark boots ran the ~9 s suite inside `module_start()`. Both
+  completed and restored every register, then SceShell died a few seconds
+  into the home screen loading: `ScePafJobDefault` called a null function
+  pointer, with an identical stack in both core dumps
+  (`captures/boot33_crash`, `boot34_crash`, decoded with psp2_core_parse).
+  Both dumps' TTY shows the trigger: SceShell's MTP server failed to start
+  (`sceMtpStart` `0x80540008`, interface `0x80543601`, and `0x80540008` still
+  in R11 of the crashing frame), and its error path is what jumps to null.
+  Moving the suite to a thread that starts 30 s after boot (boot 35) removed
+  the crash. The normal apply path takes well under a second, which is why
+  boots 26-32 never hit this; keep it that way.
+
   The rest of this bullet is the record of how the dead ends were eliminated.
 
 * **L1 / ACTLR - the dead ends, and why the devkit's technique does not port.**

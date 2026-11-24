@@ -1274,6 +1274,7 @@ static int bench_leg_thread(SceSize args, void *argp)
         pfe_bench_stride(pfe_bench_strides[i], &r);
         log_bench_res("stride", pfe_bench_strides[i], &r);
     }
+    pfe_bench_pmu_disable();
     return 0;
 }
 
@@ -1282,6 +1283,8 @@ static void run_bench_suite(void)
     unsigned int orig_actlr = 0, orig_pctl = 0;
     __asm__ __volatile__("mrc p15, 0, %0, c1, c0, 1" : "=r"(orig_actlr));
     log_hex_line("bench: original actlr ", orig_actlr);
+    log_hex_line("bench: uptime ms at start ",
+                 (unsigned int)(ksceKernelGetSystemTimeWide() / 1000u));
 
     int br = pfe_bench_init();
     if (br < 0) {
@@ -1325,7 +1328,30 @@ static void run_bench_suite(void)
     apply_l1_actlr(orig_actlr & (B_AOW | B_PF), ~orig_actlr & (B_AOW | B_PF));
     pl310_prefetch_rmw(B_PCTL_OWNED, orig_pctl & B_PCTL_OWNED, NULL, NULL);
     pfe_bench_fini();
+    log_hex_line("bench: uptime ms at end ",
+                 (unsigned int)(ksceKernelGetSystemTimeWide() / 1000u));
     log_line("bench: done");
+}
+
+/*
+ * The suite takes about 9 seconds. Run inside module_start() it blocks boot
+ * for that long, and that is enough to make SceShell's MTP server fail to
+ * start (sceMtpStart 0x80540008, interface 0x80543601) - whose error path then
+ * calls a null function pointer and takes the shell down. Boots 33 and 34
+ * crashed identically that way, after the suite had restored every register.
+ * So it runs here instead, once the shell is up, and boot is not held at all.
+ */
+#define BENCH_START_DELAY_US (30u * 1000u * 1000u)
+
+static int bench_main_thread(SceSize args, void *argp)
+{
+    (void)args; (void)argp;
+    ksceKernelDelayThread(BENCH_START_DELAY_US);
+    run_bench_suite();
+    probe_cpu_regs();
+    log_line("==== vita_prefetch_enabler bench done ====");
+    flush_log_to_disk();
+    return 0;
 }
 
 int module_start(SceSize argc, const void *args)
@@ -1394,9 +1420,11 @@ int module_start(SceSize argc, const void *args)
     if (bench) {
         /* The suite sets every leg itself and restores the firmware state
          * afterwards, so the l1/l2/alloc keys are ignored in this mode. */
-        log_line("bench=on: running the benchmark suite, other keys ignored");
-        run_bench_suite();
-        probe_cpu_regs();
+        log_line("bench=on: suite deferred to a thread, starting in 30 s; other keys ignored");
+        SceUID th = ksceKernelCreateThread("pfe_bench_main", bench_main_thread,
+                                           0x60, 0x4000, 0, 0, NULL);
+        if (th < 0 || ksceKernelStartThread(th, 0, NULL) < 0)
+            log_hex_line("bench: could not start the deferred thread ", (unsigned int)th);
         goto write_out;
     }
 

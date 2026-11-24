@@ -55,6 +55,7 @@ void pfe_bench_fini(void);
 
 /* Enables the PMU cycle counter on the calling core. */
 void pfe_bench_pmu_enable(void);
+void pfe_bench_pmu_disable(void);
 
 void pfe_bench_chase(unsigned int ws_bytes, struct pfe_bench_res *r);
 void pfe_bench_stride(unsigned int stride_bytes, struct pfe_bench_res *r);

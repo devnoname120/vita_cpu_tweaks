@@ -1,0 +1,1080 @@
+*******************************************************************************
+*                                                                             *
+*                        Exception Analysis                                   *
+*                                                                             *
+*******************************************************************************
+
+PREFETCH_ABORT
+
+ScePafJobDefault stopped with prefetch-abort exception at 0x00000000. The MMU reported translation fault, page during a instruction fetch at 0x00000000.
+
+PSP2CORE_ANALYSIS_SUMMARY:
+    Analyzer schema            : psp2_core_parse.analysis.v1
+    Classification             : PREFETCH_ABORT
+    Failure bucket             : PREFETCH_ABORT|pc:0x00000000|stop:0x30003|fs:07|access:execute
+    Failure hash               : 4216d8b663a5e442e0f34aa0d49b0be7f70a6271271f2e01ccbbc05df112b59b
+    Dump completeness          : complete
+    Notes / PT_LOAD            : 34 / 137
+    Captured memory            : 0x159000 (1.3 MiB)
+    Process                    : SceShell (0x00041b95)
+    Application                : NPXS19999
+    Threads / modules          : 50 / 44
+    Kernel objects / active    : 495 / 42
+    Wait edges / cycles        : 40 / 0
+    Decoded / partial notes    : 34 / 0
+
+DUMP_FILE:
+    psp2core-SceShell.spsp2dmp
+
+DUMP_FILE_ATTRIBUTES:
+    Encryption                 : AES-128-CBC (retail key ID 2)
+    HMAC verification          : verified (retail keys)
+    Access parameters          : stop=0x00030003 pc=0x00000000 lr=0x812c8f2d system=0x03600011
+    Compression                : gzip
+    Compression complete       : true
+    ELF class / machine        : ELF32 / 40
+    ELF type / flags           : 4 / 0x05000000
+    Input size                 : 0x75980 (470.4 KiB)
+    ELF image size             : 0x44b22c (4.3 MiB)
+    Program headers            : 171 / 171
+    File SHA-256               : 3b9d30f221c2e5616131cdfbe6b1a2f641850125eeb9678276d921ea724b1fa0
+    Image SHA-256              : b7e8c6b676713b821ad851b29bb9b03a4d0b492607e8216227519061b59d3b21
+    Structural issues          : none
+
+NOTE_DECODER_COVERAGE:
+    Recovered notes            : 34
+    Decoded                    : 34
+    Partial                    : 0
+    Inventory only             : 0
+    Decoder errors             : 0
+
+NOTE_INVENTORY:
+    [00] type=0x1000 v=1    size=0x28/0x28 decoded   COREFILE_INFO
+         sha256=35e6f47b377a25ad97cdb03a2f582828d4cd302a4a37a4306763ccef1423e924
+    [01] type=0x1003 v=18   size=0x2718/0x2718 decoded   THREAD_INFO
+         sha256=12c8406810851f7f3d422922053bd468123fb336e23d257adcff8849a66efc15
+    [02] type=0x100a v=1    size=0x17e4/0x17e4 decoded   SEMAPHORE_INFO
+         sha256=19056c36020ca91581edb469444e243f31bd72359133fd87c24907732bc99bfa
+    [03] type=0x100b v=1    size=0xa98/0xa98 decoded   EVENTFLAG_INFO
+         sha256=493113baed4dacb8ce840bd97b200a7c0954c5eaf7cb42a57bec4c3d82a69297
+    [04] type=0x100c v=9    size=0x11a0/0x11a0 decoded   MUTEX_INFO
+         sha256=3375d029a670b9227fc256d93add275df5923bb356c2a54ffd637922164bf828
+    [05] type=0x100d v=1    size=0x37f0/0x37f0 decoded   LWMUTEX_INFO
+         sha256=9d874c9d42410ec2b1561ce502427506dda7eec1c553cb5cf743194d3b8c9163
+    [06] type=0x1010 v=17   size=0x1300/0x1300 decoded   MESG_PIPE_INFO
+         sha256=7125e5657f85f6685efbadf5e68351e7f32608ac2515f8e933f8b095ddc806c2
+    [07] type=0x1011 v=1    size=0x5f0/0x5f0 decoded   CALLBACK_INFO
+         sha256=b017d07ee2c5d4bbdf5ddef05a533ffe7a7649f6eafed29249495a2cc4c3a4ba
+    [08] type=0x1013 v=17   size=0xa0/0xa0 decoded   TIMER_INFO
+         sha256=2d05111a678a17e5ee5f3545cdcd695ef50bee23cc494e48b5b59290fa045136
+    [09] type=0x1015 v=1    size=0x174/0x174 decoded   CONDVAR_INFO
+         sha256=49a032336b5de54cb4426f75ec5fd0c1f808293eae66432ce97eb69e4cc2c094
+    [10] type=0x1016 v=6    size=0x4c8/0x4c8 decoded   LWCONDVAR_INFO
+         sha256=398bd78ed89a38b17f5ddb685b1177b4a72a6a8ecd8e572c783acaf2b475b030
+    [11] type=0x1004 v=17   size=0x4978/0x4978 decoded   THREAD_REG_INFO
+         sha256=e08c12747560b3694505e0109f3c15adc43736a342fe2c23767683fce62f6aa5
+    [12] type=0x1002 v=1    size=0x90/0x90 decoded   PROCESS_INFO
+         sha256=a4969500b45a96c2024ced0b5644fb42b0ad1c1ddf99b696fe1ed8d1ae53b018
+    [13] type=0x1001 v=4    size=0x60/0x60 decoded   SYSTEM_INFO
+         sha256=22f289f88e0221071a671fc3a0a297aaee523a74ca61c119850e6bfd80a790a3
+    [14] type=0x101c v=6    size=0x104/0x104 decoded   APP_INFO
+         sha256=ab293976f48371b0b156e1046ff7ae4a8c7baf27b36d02de91a13c26f7c50d5f
+    [15] type=0x101a v=4    size=0x80/0x80 decoded   HW_INFO
+         sha256=d31272bbe15cf40bc7ebbcc3cbb95432147e32e4df308d6edeae77f9763cfc11
+    [16] type=0x101d v=6    size=0x204/0x204 decoded   BUILD_VER_INFO
+         sha256=83c13aee7276dd21d5b463cb5b1bb573db8bccaad8d4e51c583f7c10e7f0dd40
+    [17] type=0x101b v=4    size=0x328/0x328 decoded   STACK_INFO
+         sha256=46a7449ca16b0d814bd6adea74a9f9f7cee5fcfcfb083d97715ec7a57473cb7e
+    [18] type=0x1005 v=1    size=0x18a8/0x18a8 decoded   MODULE_INFO
+         sha256=a61ff38f3e1407be2d3e1d73eed017c513fa1e1c079bde0388aabb12c3c949d3
+    [19] type=0x1006 v=6    size=0x152fc/0x152fc decoded   LIBRARY_INFO
+         sha256=f8972bbe0faf13f9d5d280f12c1709a6bf85c2317e4616223c8ee4fafffc57e0
+    [20] type=0x1019 v=2    size=0x568/0x568 decoded   META_DATA_INFO
+         sha256=dd221fc5353fb464acd6a069779ebab18050d66cae913a6df449f4c392e74411
+    [21] type=0x1007 v=1    size=0xb90/0xb90 decoded   MEM_BLK_INFO
+         sha256=7bea62303e8e66c4649c850b87465d9fa27a9cc37ff89aaa38009b6de37219a5
+    [22] type=0x1009 v=5    size=0x270/0x270 decoded   FILE_INFO
+         sha256=c8bff6b85e2384d35d9b7b17ae29227b15808129959d640e6eb7dbbea58fd5aa
+    [23] type=0x101e v=6    size=0x210/0x210 decoded   EXTNL_PROC_INFO
+         sha256=b32674c9821d79c74d7a48ad3cfc6482693ddcdc8b1ad959aa7c5c24187c2dfe
+    [24] type=0x101f v=6    size=0x131c/0x131c decoded   BUDGET_INFO
+         sha256=fa4df41312cfb1e6ade50edc45b2c3042ff133b39ceb7b69b7b0d962a12e1c6c
+    [25] type=0x1020 v=6    size=0x138/0x138 decoded   APP_LIST_INFO
+         sha256=084471f3c673cc32ce60502681f8b15d775de9a39f308db7b61bcc36cc876407
+    [26] type=0x1021 v=6    size=0xc4/0xc4 decoded   DEVICE_INFO
+         sha256=64b78d22000f08ba9c6d234cb9b34ee15b2dcbcedeaf1fd9f7f18f5cb5fae1f8
+    [27] type=0x102f v=17   size=0xb4/0xb4 decoded   SYS_DEVICE_INFO
+         sha256=86019d27f61f193f3f23e2b6e0d6b37ac67bef157acf5eb9eecc00911d74d93f
+    [28] type=0x102a v=8    size=0x100c/0x100c decoded   TTY_INFO
+         sha256=a576d8b9283310f52a454654b05a6b2a9eac1a231433e6da6e200727987b6d1c
+    [29] type=0x102c v=9    size=0x80c/0x80c decoded   EVENT_LOG_INFO
+         sha256=e0eb86961db8ddbd3c0bfc1eb1bc618997dd99f3587bc1f9593a2907a3343c96
+    [30] type=0x102d v=16   size=0x1fe334/0x1fe334 decoded   SYSTEM_INFO2
+         sha256=5a1d1baa1b27062641d9ca6b5d2ca23da2f4d91d9b4f782a3db74ad464228f3c
+    [31] type=0x2001 v=8    size=0xc/0xc decoded   GPU_ACT_INFO
+         sha256=958f8e67d123a4fd3942a588a4447f781501af6120487ff147b2cef0e5076421
+    [32] type=0x1031 v=19   size=0x100c/0x100c decoded   TTY_INFO2
+         sha256=58cfef928dc095b8aadd16edc067207c6212c3695aff9a6d9eaab66783f78e92
+    [33] type=0x102e v=17   size=0x264/0x264 decoded   SUMMARY_INFO
+         sha256=0d1eaa4e2f257f06be527806ae2ee86e4a1cc60c9c4bf9012f339beb3710e265
+
+SCECOREDUMP_COLLECTION_STAGES:
+    Format / entries           : 17 / 50
+    Incomplete entries         : 0
+    [00] 0x1000 COREFILE_INFO            complete       written=0x44/0x44
+    [01] 0x1003 THREAD_INFO              complete       written=0x2734/0x2734
+    [02] 0x100a SEMAPHORE_INFO           complete       written=0x1800/0x1800
+    [03] 0x100b EVENTFLAG_INFO           complete       written=0xab4/0xab4
+    [04] 0x100c MUTEX_INFO               complete       written=0x11bc/0x11bc
+    [05] 0x100d LWMUTEX_INFO             complete       written=0x380c/0x380c
+    [06] 0x1010 MESG_PIPE_INFO           complete       written=0x131c/0x131c
+    [07] 0x1011 CALLBACK_INFO            complete       written=0x60c/0x60c
+    [08] 0x1013 TIMER_INFO               complete       written=0xbc/0xbc
+    [09] 0x1014 RWLOCK_INFO              not-present    written=0x0/0x0
+    [10] 0x1015 CONDVAR_INFO             complete       written=0x190/0x190
+    [11] 0x1016 LWCONDVAR_INFO           complete       written=0x4e4/0x4e4
+    [12] 0x1030 SMPL_EVENT_INFO          not-present    written=0x0/0x0
+    [13] 0x1004 THREAD_REG_INFO          complete       written=0x4994/0x4994
+    [14] 0x1002 PROCESS_INFO             complete       written=0xac/0xac
+    [15] 0x1001 SYSTEM_INFO              complete       written=0x7c/0x7c
+    [16] 0x101c APP_INFO                 complete       written=0x120/0x120
+    [17] 0x101a HW_INFO                  complete       written=0x9c/0x9c
+    [18] 0x101d BUILD_VER_INFO           complete       written=0x220/0x220
+    [19] 0x101b STACK_INFO               complete       written=0x344/0x344
+    [20] 0x1005 MODULE_INFO              complete       written=0x18c4/0x18c4
+    [21] 0x1006 LIBRARY_INFO             complete       written=0x15318/0x15318
+    [22] 0x1019 META_DATA_INFO           complete       written=0x584/0x584
+    [23] 0x4002 INTERNAL_CAPTURE_4002    complete       written=0x21f000/0x21f000
+    [24] 0x4003 INTERNAL_CAPTURE_4003    not-present    written=0x0/0x0
+    [25] 0x1007 MEM_BLK_INFO             complete       written=0xbac/0xbac
+    [26] 0x1009 FILE_INFO                complete       written=0x28c/0x28c
+    [27] 0x1017 FIBER_INFO               not-present    written=0x0/0x0
+    [28] 0x1018 ULT_INFO                 not-present    written=0x0/0x0
+    [29] 0x101e EXTNL_PROC_INFO          complete       written=0x22c/0x22c
+    [30] 0x101f BUDGET_INFO              complete       written=0x1338/0x1338
+    [31] 0x1020 APP_LIST_INFO            complete       written=0x154/0x154
+    [32] 0x1021 DEVICE_INFO              complete       written=0xe0/0xe0
+    [33] 0x102f SYS_DEVICE_INFO          complete       written=0xd0/0xd0
+    [34] 0x1022 USER_INFO                not-present    written=0x0/0x0
+    [35] 0x1023 ULT_SEMA_INFO            not-present    written=0x0/0x0
+    [36] 0x1024 ULT_MUTEX_INFO           not-present    written=0x0/0x0
+    [37] 0x1029 ULT_COND_INFO            not-present    written=0x0/0x0
+    [38] 0x1028 ULT_RWLOCK_INFO          not-present    written=0x0/0x0
+    [39] 0x1027 ULT_QUEUE_INFO           not-present    written=0x0/0x0
+    [40] 0x1025 ULT_Q_POOL_INFO          not-present    written=0x0/0x0
+    [41] 0x1026 ULT_WQPOOL_INFO          not-present    written=0x0/0x0
+    [42] 0x102a TTY_INFO                 complete       written=0x1028/0x1028
+    [43] 0x102b SCREENSHOT_INFO          not-present    written=0x0/0x0
+    [44] 0x102c EVENT_LOG_INFO           complete       written=0x828/0x828
+    [45] 0x102d SYSTEM_INFO2             complete       written=0x1fe350/0x1fe350
+    [46] 0x2000 GPU_INFO                 not-present    written=0x0/0x0
+    [47] 0x2001 GPU_ACT_INFO             complete       written=0x28/0x28
+    [48] 0x1031 TTY_INFO2                complete       written=0x1028/0x1028
+    [49] 0x102e SUMMARY_INFO             self-reference written=0x0/0x280
+
+CAPTURE_ENVIRONMENT:
+    Title ID                   : NPXS19999
+    Title                      : unavailable
+    Title version              : 00.00
+    System producer words      : 0x03600011 0x03600011
+    Hardware revision word     : 0x00000105
+    Hardware flags word        : 0x00000010
+    Build branch               : release_branches/release_03.600
+    Corefile kind / subtype    : 0x00000013 / 0x00000002
+    Metadata entries           : 44 / 44
+        [00] id=0x40010603 payload=0x0/0x0
+        [01] id=0x40030539 payload=0x0/0x0
+        [02] id=0x400103ff payload=0x0/0x0
+        [03] id=0x400102bd payload=0x0/0x0
+        [04] id=0x400102b9 payload=0x0/0x0
+        [05] id=0x400102b1 payload=0x0/0x0
+        [06] id=0x400102ad payload=0x0/0x0
+        [07] id=0x400102a7 payload=0x0/0x0
+        [08] id=0x400102a3 payload=0x0/0x0
+        [09] id=0x40010299 payload=0x0/0x0
+        [10] id=0x40010293 payload=0x0/0x0
+        [11] id=0x4001028d payload=0x0/0x0
+        [12] id=0x40010281 payload=0x0/0x0
+        [13] id=0x4001027d payload=0x0/0x0
+        [14] id=0x40010275 payload=0x0/0x0
+        [15] id=0x40010269 payload=0x0/0x0
+        [16] id=0x40010263 payload=0x0/0x0
+        [17] id=0x4001025d payload=0x0/0x0
+        [18] id=0x40010257 payload=0x0/0x0
+        [19] id=0x4001024b payload=0x0/0x0
+        [20] id=0x40010241 payload=0x0/0x0
+        [21] id=0x4001022d payload=0x0/0x0
+        [22] id=0x40020089 payload=0x0/0x0
+        [23] id=0x40020069 payload=0x0/0x0
+        [24] id=0x4002002b payload=0x0/0x0
+        [25] id=0x400100c9 payload=0x0/0x0
+        [26] id=0x400100c3 payload=0x0/0x0
+        [27] id=0x400100b9 payload=0x0/0x0
+        [28] id=0x400100ab payload=0x0/0x0
+        [29] id=0x400100a3 payload=0x0/0x0
+        [30] id=0x4001009d payload=0x0/0x0
+        [31] id=0x40010095 payload=0x0/0x0
+        [32] id=0x40010087 payload=0x0/0x0
+        [33] id=0x4001007f payload=0x0/0x0
+        [34] id=0x40010071 payload=0x0/0x0
+        [35] id=0x4001001b payload=0x0/0x0
+        [36] id=0x40010019 payload=0x0/0x0
+        [37] id=0x40010017 payload=0x0/0x0
+        [38] id=0x40010015 payload=0x0/0x0
+        [39] id=0x40010013 payload=0x0/0x0
+        [40] id=0x40010011 payload=0x0/0x0
+        [41] id=0x4001000f payload=0x0/0x0
+        [42] id=0x4001000d payload=0x0/0x0
+        [43] id=0x40010001 payload=0x0/0x0
+    Metadata planned padding   : 0x400; nonzero=0
+    Screenshot (SYSTEM_INFO2)  : process=none, shell=960x544
+    Screenshot HMAC            : verified (retail keys)
+    GPU activity producer note : empty ordinary record
+
+PROCESS_CONTEXT:
+    Name                       : SceShell
+    Process ID                 : 0x00041b95
+    Capture status / process flags: 0x00000000 / 0x0000000d
+    Parent process ID          : 0xffffffff
+    Executable                 : vs0:vsh/shell/shell.self
+    Path bytes                 : 25
+    Producer words 0x30        : 0x00000000 0x00000008 0x81018f0d 0x0552f692
+    Producer words 0x44        : 0x00000000 0x00030003 0x00000000 0x00000000 0x00000000
+    Producer footer            : 0x814e32ec 0x81510fc4 0x81510fc4 0x815136b0
+    Accounting value           : 0x0000000000845f0d
+
+APPLICATION_AND_PROCESS_SET:
+    Applications               : 1 / 1
+        NPXS19999  pid=0x00041b95 path=<none>
+    External processes         : 2 / 2
+        SceKernelProcess pid=0x00010005 ppid=0xffffffff flags=0x00000003 path=<none>
+        SceShell pid=0x00041b95 ppid=0xffffffff flags=0x0000000d path=vs0:vsh/shell/shell.self
+
+FAULT_EVIDENCE:
+    Exception kind / access    : prefetch-abort / execute
+    Fault address              : 0x00000000 from IFAR
+    Fault status               : translation fault, page (IFSR=0x00000007)
+    Status code / domain       : 0x07 / 0
+    FAR not valid              : false
+    Long descriptor format     : false
+    Address classification     : null-page
+    Address bytes captured     : false
+    Matching memory blocks     : 0
+
+CPU_THREADS:
+    Thread count               : 50
+    Crashed indices            : [6]
+    [000] uid=0x40010005 waiting      cpu= 3 pri= 76 SceShellMain
+        stop=no reason(0x00000) wait-type=2097152 wait-id=0x400101eb
+        PC=SceLibKernel@1+0x61c4 LR=SceLibKernel@1+0xab0a SP=0x8159af20 CPSR=0x80000010 stack-at-SP=true
+    [001] uid=0x40020081 waiting      cpu= 3 pri= 96 LiveAreaSearch
+        stop=no reason(0x00000) wait-type=1 wait-id=0x00000000
+        PC=livearea_search@1+0xa328 LR=livearea_search@1+0x36ce SP=0x81860f38 CPSR=0x60000010 stack-at-SP=true
+    [002] uid=0x40010091 waiting      cpu= 3 pri= 64 vitacompanion_nosleep_thread
+        stop=no reason(0x00000) wait-type=1 wait-id=0x00000000
+        PC=vitacompanion@1+0xa0f8 LR=vitacompanion@1+0xd68 SP=0x815f0fe8 CPSR=0x20000010 stack-at-SP=true
+    [003] uid=0x40010093 waiting      cpu= 3 pri= 64 vitacompanion_net_thread
+        stop=no reason(0x00000) wait-type=1 wait-id=0x00000000
+        PC=vitacompanion@1+0xa0f8 LR=vitacompanion@1+0xade SP=0x816b0fc8 CPSR=0x80000010 stack-at-SP=true
+    [004] uid=0x4001018d waiting      cpu= 3 pri=106 SceShellCronCallback
+        stop=no reason(0x00000) wait-type=2147483680 wait-id=0x40010189
+        PC=SceLibKernel@1+0x66f4 LR=SceLibKernel@1+0xa95e SP=0x815f8fe0 CPSR=0x60000010 stack-at-SP=true
+    [005] uid=0x400101b5 waiting      cpu= 3 pri= 64 SceGxmDisplayQueue
+        stop=no reason(0x00000) wait-type=65536 wait-id=0xffffffff
+        PC=ScePaf@1+0x2617a0 LR=ScePaf@1+0x8e720 SP=0x815f3f88 CPSR=0x40000010 stack-at-SP=true
+  * [006] uid=0x400201bf running      cpu= 3 pri=106 ScePafJobDefault
+        stop=prefetch-abort exception(0x30003) wait-type=0 wait-id=0x00000000
+        PC=0x00000000 LR=SceShell@1+0x2b6dac SP=0x8169ceb0 CPSR=0x60000010 stack-at-SP=true
+    [007] uid=0x400101cf waiting      cpu= 3 pri= 86 ScePafTextThread0
+        stop=no reason(0x00000) wait-type=2097152 wait-id=0x400101c7
+        PC=SceLibKernel@1+0x61c4 LR=SceLibKernel@1+0xab0a SP=0x815fcf90 CPSR=0x80000010 stack-at-SP=true
+    [008] uid=0x40010209 waiting      cpu= 3 pri= 71 SceWaveMain
+        stop=no reason(0x00000) wait-type=16 wait-id=0x40010207
+        PC=SceLibKernel@1+0x6714 LR=SceLibKernel@1+0xa8e4 SP=0x816b4fb0 CPSR=0x60000010 stack-at-SP=true
+    [009] uid=0x400102cb waiting      cpu= 3 pri= 80 SceShellSvcServer
+        stop=no reason(0x00000) wait-type=2147483680 wait-id=0x400102c9
+        PC=SceLibKernel@1+0x66f4 LR=SceLibKernel@1+0xa95e SP=0x8216cfa8 CPSR=0x00000010 stack-at-SP=true
+    [010] uid=0x4003030f waiting      cpu= 3 pri= 80 SceNpTusServer
+        stop=no reason(0x00000) wait-type=2147483680 wait-id=0x400203f5
+        PC=SceLibKernel@1+0x66f4 LR=SceLibKernel@1+0xa95e SP=0x821f8fa8 CPSR=0x00000010 stack-at-SP=true
+    [011] uid=0x40010329 waiting      cpu= 3 pri=106 SceDbUtilDcnServer
+        stop=no reason(0x00000) wait-type=2147483680 wait-id=0x40010327
+        PC=SceLibKernel@1+0x66f4 LR=SceLibKernel@1+0xa95e SP=0x816f8f98 CPSR=0x00000010 stack-at-SP=true
+    [012] uid=0x4001035b waiting      cpu= 3 pri= 96 SceDbUtilDcnClient
+        stop=no reason(0x00000) wait-type=16 wait-id=0x4001033d
+        PC=SceLibKernel@1+0x6714 LR=SceLibKernel@1+0xa8e4 SP=0x81848c90 CPSR=0x00000010 stack-at-SP=true
+    [013] uid=0x4003036f waiting      cpu= 3 pri= 96 SceNpManagerCallback
+        stop=no reason(0x00000) wait-type=262144 wait-id=0x40030373
+        PC=SceLibKernel@1+0x62c4 LR=SceLibKernel@1+0xaa5c SP=0x816d7f78 CPSR=0x20000010 stack-at-SP=true
+    [014] uid=0x40020377 waiting      cpu= 3 pri=106 SceTriggerMgrJob
+        stop=no reason(0x00000) wait-type=32 wait-id=0x40020375
+        PC=SceLibKernel@1+0x6304 LR=SceLibKernel@1+0xa956 SP=0x82174fc8 CPSR=0x40000010 stack-at-SP=true
+    [015] uid=0x4002038f waiting      cpu= 3 pri= 80 SceNpScoreServer
+        stop=no reason(0x00000) wait-type=2147483680 wait-id=0x40020391
+        PC=SceLibKernel@1+0x66f4 LR=SceLibKernel@1+0xa95e SP=0x8217cfa8 CPSR=0x00000010 stack-at-SP=true
+    [016] uid=0x400103af waiting      cpu= 3 pri=116 SceNetCtlInet
+        stop=no reason(0x00000) wait-type=16 wait-id=0x400103ad
+        PC=SceLibKernel@1+0x6714 LR=SceLibKernel@1+0xa8e4 SP=0x816d4a80 CPSR=0x00000010 stack-at-SP=true
+    [017] uid=0x400103b3 waiting      cpu= 3 pri=116 SceNetCtlAdhoc
+        stop=no reason(0x00000) wait-type=16 wait-id=0x400103b1
+        PC=SceLibKernel@1+0x6714 LR=SceLibKernel@1+0xa8e4 SP=0x816e4ef0 CPSR=0x00000010 stack-at-SP=true
+    [018] uid=0x400103cb waiting      cpu= 3 pri=116 SceNetUpnp
+        stop=no reason(0x00000) wait-type=16 wait-id=0x400103c9
+        PC=SceLibKernel@1+0x6714 LR=SceLibKernel@1+0xa8e4 SP=0x816b7e50 CPSR=0x00000010 stack-at-SP=true
+    [019] uid=0x40010403 waiting      cpu= 3 pri= 96 SceNpManagerServerJob
+        stop=no reason(0x00000) wait-type=2097152 wait-id=0x40010401
+        PC=SceLibKernel@1+0x61c4 LR=SceLibKernel@1+0xab0a SP=0x82388f98 CPSR=0x80000010 stack-at-SP=true
+    [020] uid=0x4001040d waiting      cpu= 3 pri= 80 SceNpManagerServer
+        stop=no reason(0x00000) wait-type=2147483680 wait-id=0x4001040b
+        PC=SceLibKernel@1+0x66f4 LR=SceLibKernel@1+0xa95e SP=0x81824fa8 CPSR=0x00000010 stack-at-SP=true
+    [021] uid=0x40010419 waiting      cpu= 3 pri= 96 SceNetCallout
+        stop=no reason(0x00000) wait-type=256 wait-id=0x40010417
+        PC=SceLibKernel@1+0x6144 LR=SceLibKernel@1+0xa9ce SP=0x82390fc0 CPSR=0x60000010 stack-at-SP=true
+    [022] uid=0x4001041d dormant      cpu=-1 pri= 96 SceNpCoreRecv
+        stop=no reason(0x00000) wait-type=0 wait-id=0x00000000
+        PC=SceShell@1+0x313aca LR=SceLibKernel@1+0x73c SP=0x82399000 CPSR=0x60000010 stack-at-SP=false
+    [023] uid=0x4001041f dormant      cpu=-1 pri= 96 SceNpCoreMain
+        stop=no reason(0x00000) wait-type=0 wait-id=0x00000000
+        PC=SceShell@1+0x3139ee LR=SceLibKernel@1+0x73c SP=0x823a1000 CPSR=0xffffffff stack-at-SP=false
+    [024] uid=0x40010425 dormant      cpu=-1 pri= 96 SceNpPollingMain
+        stop=no reason(0x00000) wait-type=0 wait-id=0x00000000
+        PC=SceShell@1+0x30d912 LR=SceLibKernel@1+0x73c SP=0x823a9000 CPSR=0x00000010 stack-at-SP=false
+    [025] uid=0x40010429 waiting      cpu= 3 pri= 96 SceNpImpsCoreMain
+        stop=no reason(0x00000) wait-type=256 wait-id=0x40030369
+        PC=SceLibKernel@1+0x6144 LR=SceLibKernel@1+0xa9ce SP=0x823b0da0 CPSR=0x60000010 stack-at-SP=true
+    [026] uid=0x4001042d waiting      cpu= 3 pri= 96 SceNpImpsCtl
+        stop=no reason(0x00000) wait-type=2147745792 wait-id=0x40010485
+        PC=SceLibKernel@1+0x6324 LR=SceLibKernel@1+0xaa74 SP=0x823b8f18 CPSR=0x00000010 stack-at-SP=true
+    [027] uid=0x40010435 waiting      cpu= 3 pri= 96 SceNpImpsCacheCore
+        stop=no reason(0x00000) wait-type=16 wait-id=0xffffffff
+        PC=SceNet@1+0xa068 LR=SceNet@1+0x3d76 SP=0x82407428 CPSR=0x60000010 stack-at-SP=true
+    [028] uid=0x40010441 waiting      cpu= 3 pri= 96 SceNpImpsSvcCtxMgr
+        stop=no reason(0x00000) wait-type=2097152 wait-id=0x40010445
+        PC=SceLibKernel@1+0x61c4 LR=SceLibKernel@1+0xab0a SP=0x81834fb0 CPSR=0x80000010 stack-at-SP=true
+    [029] uid=0x40010457 waiting      cpu= 3 pri= 80 SceNpImpsUtilServer
+        stop=no reason(0x00000) wait-type=2147483680 wait-id=0x40010455
+        PC=SceLibKernel@1+0x66f4 LR=SceLibKernel@1+0xa95e SP=0x8184cfa8 CPSR=0x00000010 stack-at-SP=true
+    [030] uid=0x4001045f waiting      cpu= 3 pri=120 SceNpImpsUtilMPState
+        stop=no reason(0x00000) wait-type=2097152 wait-id=0x40010465
+        PC=SceLibKernel@1+0x61c4 LR=SceLibKernel@1+0xab0a SP=0x81867f88 CPSR=0x80000010 stack-at-SP=true
+    [031] uid=0x40030519 waiting      cpu= 3 pri=106 SceScreenShotJobQueue
+        stop=no reason(0x00000) wait-type=32 wait-id=0x40030517
+        PC=SceLibKernel@1+0x6304 LR=SceLibKernel@1+0xa956 SP=0x82654fc8 CPSR=0x40000010 stack-at-SP=true
+    [032] uid=0x4002051b waiting      cpu= 3 pri=106 SceLiveAreaDailyCronJob
+        stop=no reason(0x00000) wait-type=32 wait-id=0x400205e5
+        PC=SceLibKernel@1+0x6304 LR=SceLibKernel@1+0xa956 SP=0x8247cfc8 CPSR=0x40000010 stack-at-SP=true
+    [033] uid=0x40010549 waiting      cpu= 3 pri= 96 SceNpTrophyServerJob
+        stop=no reason(0x00000) wait-type=2097152 wait-id=0x40010547
+        PC=SceLibKernel@1+0x61c4 LR=SceLibKernel@1+0xab0a SP=0x82444f98 CPSR=0x80000010 stack-at-SP=true
+    [034] uid=0x40010553 waiting      cpu= 3 pri= 80 SceNpTrophyServer
+        stop=no reason(0x00000) wait-type=2147483680 wait-id=0x40010551
+        PC=SceLibKernel@1+0x66f4 LR=SceLibKernel@1+0xa95e SP=0x8244cfa8 CPSR=0x00000010 stack-at-SP=true
+    [035] uid=0x4001055d waiting      cpu= 3 pri= 80 SceNpPartyUtilServer
+        stop=no reason(0x00000) wait-type=2147483680 wait-id=0x4001055b
+        PC=SceLibKernel@1+0x66f4 LR=SceLibKernel@1+0xa95e SP=0x81837fa8 CPSR=0x00000010 stack-at-SP=true
+    [036] uid=0x40010565 waiting      cpu= 3 pri=191 SceNpPartyVSHNewIndicator
+        stop=no reason(0x00000) wait-type=2097152 wait-id=0x40010563
+        PC=SceLibKernel@1+0x61c4 LR=SceLibKernel@1+0xab0a SP=0x81876e50 CPSR=0x40000010 stack-at-SP=true
+    [037] uid=0x40010567 waiting      cpu= 3 pri=116 SceNpPartyVshInitializeNI
+        stop=no reason(0x00000) wait-type=32 wait-id=0x40010569
+        PC=SceLibKernel@1+0x6304 LR=SceLibKernel@1+0xa956 SP=0x82454fc8 CPSR=0x40000010 stack-at-SP=true
+    [038] uid=0x40010573 waiting      cpu= 3 pri= 96 SceNpSnsFbServerJob
+        stop=no reason(0x00000) wait-type=2097152 wait-id=0x40010571
+        PC=SceLibKernel@1+0x61c4 LR=SceLibKernel@1+0xab0a SP=0x8245cf98 CPSR=0x80000010 stack-at-SP=true
+    [039] uid=0x4001057d waiting      cpu= 3 pri= 80 SceNpSnsFbServer
+        stop=no reason(0x00000) wait-type=2147483680 wait-id=0x4001057b
+        PC=SceLibKernel@1+0x66f4 LR=SceLibKernel@1+0xa95e SP=0x82464fa8 CPSR=0x00000010 stack-at-SP=true
+    [040] uid=0x4001058d waiting      cpu= 3 pri=116 SceNpCommerce2SessionManager
+        stop=no reason(0x00000) wait-type=32 wait-id=0x4001058b
+        PC=SceLibKernel@1+0x6304 LR=SceLibKernel@1+0xa956 SP=0x821fcd38 CPSR=0x60000010 stack-at-SP=true
+    [041] uid=0x400105b9 waiting      cpu= 3 pri= 96 SceNpServiceIpcServer
+        stop=no reason(0x00000) wait-type=2147483680 wait-id=0x400105b7
+        PC=SceLibKernel@1+0x66f4 LR=SceLibKernel@1+0xa95e SP=0x81863fa0 CPSR=0x00000010 stack-at-SP=true
+    [042] uid=0x400105bb waiting      cpu= 3 pri= 96 SceNpPushCtl
+        stop=no reason(0x00000) wait-type=256 wait-id=0x4001047d
+        PC=SceLibKernel@1+0x6144 LR=SceLibKernel@1+0xa9ce SP=0x823bcf20 CPSR=0x60000010 stack-at-SP=true
+    [043] uid=0x400105c5 waiting      cpu= 3 pri=106 SceLsdbActQueue
+        stop=no reason(0x00000) wait-type=2097152 wait-id=0x400105c9
+        PC=SceLibKernel@1+0x61c4 LR=SceLibKernel@1+0xab0a SP=0x8246cfa8 CPSR=0x80000010 stack-at-SP=true
+    [044] uid=0x400105d5 waiting      cpu= 3 pri=106 SceLsdbActNetworkQueue
+        stop=no reason(0x00000) wait-type=2097152 wait-id=0x400105d9
+        PC=SceLibKernel@1+0x61c4 LR=SceLibKernel@1+0xab0a SP=0x82474fa0 CPSR=0x80000010 stack-at-SP=true
+    [045] uid=0x400205e7 waiting      cpu= 3 pri=101 SceShutterSoundJobQueue
+        stop=no reason(0x00000) wait-type=32 wait-id=0x400205f1
+        PC=SceLibKernel@1+0x6304 LR=SceLibKernel@1+0xa956 SP=0x8216ffc8 CPSR=0x40000010 stack-at-SP=true
+    [046] uid=0x40010615 waiting      cpu= 3 pri= 87 SceScreenShotServer
+        stop=no reason(0x00000) wait-type=2147483680 wait-id=0x40010613
+        PC=SceLibKernel@1+0x66f4 LR=SceLibKernel@1+0xa95e SP=0x8265cfb0 CPSR=0x00000010 stack-at-SP=true
+    [047] uid=0x40010617 waiting      cpu= 3 pri= 75 SceImeServerDispatch
+        stop=no reason(0x00000) wait-type=2147483680 wait-id=0x40010625
+        PC=SceLibKernel@1+0x66f4 LR=SceLibKernel@1+0xa95e SP=0x8217ffa0 CPSR=0x00000010 stack-at-SP=true
+    [048] uid=0x40010637 waiting      cpu= 3 pri=106 SceShellPlaylogFileAccessThread
+        stop=no reason(0x00000) wait-type=2097152 wait-id=0x4001063b
+        PC=SceLibKernel@1+0x61c4 LR=SceLibKernel@1+0xab0a SP=0x821fff70 CPSR=0x80000010 stack-at-SP=true
+    [049] uid=0x40010679 waiting      cpu= 3 pri=116 SceNetDhcp
+        stop=no reason(0x00000) wait-type=16 wait-id=0xffffffff
+        PC=SceNet@1+0xa148 LR=SceNet@1+0x4346 SP=0x82393e98 CPSR=0x60000010 stack-at-SP=true
+
+PRIMARY_CRASH_REGISTER_CONTEXT:
+    Thread                     : #6 ScePafJobDefault uid=0x400201bf
+        R0 =0000033f  R1 =812c9ecb  R2 =7bb208c4  R3 =7bb208c4
+        R4 =8169cf70  R5 =8193362c  R6 =deadbeef  R7 =deadbeef
+        R8 =e00119e4  R9 =deadbeef  R10=81680268  R11=80540008
+        R12=8146a540  SP =8169ceb0  LR =812c8f2d  PC =00000000
+    CPSR / TPIDRURW            : 0x60000010 / 0x83000010
+    Thumb / processor mode     : false / 0x10
+    IFSR / IFAR                : 0x00000007 / 0x00000000
+    DFSR / DFAR                : 0x00000000 / 0x00000000
+    Producer system words      : 0x40000000 0x00000000 0x00f00000 0x15455551 0x01371002
+    Register word 0x50         : 0x815f9800
+    Thread word 0x2c           : 0x80000000
+    Thread words 0x78          : 0x00000000 0x00000000 0x00000000 0x80028028 0x00000210 0x000003f6 0x00000b23 0x00000000 0x00000001
+    Thread recorded PC         : 0x00000000
+    Thread word 0xa0           : 0x00000000
+    Thread context 0xa4        : 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000
+    VFP debugger poison        : true
+    VFP D0-D31:
+        D0 =0x0000000000000000  D1 =0x0000000000000000  D2 =0x7ff8dead7f80dead  D3 =0x7ff8dead7f80dead
+        D4 =0x7ff8dead7f80dead  D5 =0x7ff8dead7f80dead  D6 =0x7ff8dead7f80dead  D7 =0x7ff8dead7f80dead
+        D8 =0x7ff8dead7f80dead  D9 =0x7ff8dead7f80dead  D10=0x7ff8dead7f80dead  D11=0x7ff8dead7f80dead
+        D12=0x7ff8dead7f80dead  D13=0x7ff8dead7f80dead  D14=0x7ff8dead7f80dead  D15=0x7ff8dead7f80dead
+        D16=0x0000000000000000  D17=0x7ff8dead7f80dead  D18=0x7ff8dead7f80dead  D19=0x7ff8dead7f80dead
+        D20=0x7ff8dead7f80dead  D21=0x7ff8dead7f80dead  D22=0x7ff8dead7f80dead  D23=0x7ff8dead7f80dead
+        D24=0x7ff8dead7f80dead  D25=0x7ff8dead7f80dead  D26=0x7ff8dead7f80dead  D27=0x7ff8dead7f80dead
+        D28=0x7ff8dead7f80dead  D29=0x7ff8dead7f80dead  D30=0x7ff8dead7f80dead  D31=0x7ff8dead7f80dead
+
+DISASSEMBLY AROUND 0x00000000:
+    Status                     : unavailable
+    Reason                     : runtime address is not mapped by MODULE_INFO; instruction at 0x00000000 is not captured
+
+STACK_AND_INSTRUCTION_EVIDENCE:
+    Stack range                : 0x81699000-0x8169d000 size=0x4000
+    SP / in stack / captured   : 0x8169ceb0 / True / True
+    Descending bytes used      : 0x150
+    Near low guard             : false
+    Stack producer words 08/0c : 0x00001490 / 0x00000150
+    Instruction address        : 0x00000000
+    Instruction captured       : false
+    Instruction mode / width   : ARM / 4
+    Instruction bytes          : unavailable
+    Stack-scan return candidates:
+        [8169cedc] e0001a39 -> SceLibKernel@1+0x16f8
+        [8169cee4] e0256fa9 -> ScePaf@1+0x53be8
+        [8169ceec] e02570af -> ScePaf@1+0x53cee
+        [8169cefc] e025776f -> ScePaf@1+0x543ae
+        [8169cf14] 81246621 -> SceShell@1+0x2344a0
+        [8169cf2c] e0253b33 -> ScePaf@1+0x50772
+        [8169cf34] e02142b9 -> ScePaf@1+0x10ef8
+        [8169cf64] 812c38df -> SceShell@1+0x2b175e
+        [8169cf6c] 8101506f -> SceShell@1+0x2eee
+        [8169cf90] 81246293 -> SceShell@1+0x234112
+        [8169cfc4] 8141d5dd -> SceShell@1+0x40b45c
+        [8169cfcc] e0257439 -> ScePaf@1+0x54078
+        [8169cfd4] e03e1749 -> ScePaf@1+0x1de388
+        [8169cfe4] e02577f5 -> ScePaf@1+0x54434
+        [8169cfec] e0000a7d -> SceLibKernel@1+0x73c
+    Stack-scan entries are candidates, not unwind-verified frames.
+
+LOADED_MODULES:
+    Module count               : 44
+    [00] uid=0x40010603 complete SceJpegEncArm
+         @1 r-x 0xe05e5a30-0xe05e76e4 size=0x1cb4 attr=0x00000005
+    [01] uid=0x40030539 complete ScePhotoExport
+         @1 r-x 0xe051a410-0xe051dfe4 size=0x3bd4 attr=0x00000005
+         @2 rw- 0xe0139780-0xe0139790 size=0x10 attr=0x00000006
+    [02] uid=0x400103ff complete SceLsdb
+         @1 r-x 0x823c0fd0-0x82400148 size=0x3f178 attr=0x00000005
+         @2 rw- 0x816c2380-0x816c31e4 size=0xe64 attr=0x00000006
+    [03] uid=0x400102bd complete SceNpWebApi
+         @1 r-x 0xe07ebf80-0xe07faf18 size=0xef98 attr=0x00000005
+         @2 rw- 0xe01f8c50-0xe01fcce8 size=0x4098 attr=0x00000006
+    [04] uid=0x400102b9 complete SceNpCommonPs4
+         @1 r-x 0xe07a6b30-0xe07d1868 size=0x2ad38 attr=0x00000005
+         @2 rw- 0xe013a900-0xe013b338 size=0xa38 attr=0x00000006
+    [05] uid=0x400102b1 complete SceActivityDb
+         @1 r-x 0xe074ab80-0xe0774b10 size=0x29f90 attr=0x00000005
+         @2 rw- 0xe00bb260-0xe00bb354 size=0xf4 attr=0x00000006
+    [06] uid=0x400102ad complete SceNpActivityNet
+         @1 r-x 0xe0708640-0xe07205d8 size=0x17f98 attr=0x00000005
+         @2 rw- 0xe00bef30-0xe00bf710 size=0x7e0 attr=0x00000006
+    [07] uid=0x400102a7 complete SceNpUtility
+         @1 r-x 0xe05f0240-0xe05fc328 size=0xc0e8 attr=0x00000005
+         @2 rw- 0xe00bcc60-0xe00bd4e8 size=0x888 attr=0x00000006
+    [08] uid=0x400102a3 complete SceNpCommon
+         @1 r-x 0xe0509f20-0xe05107c0 size=0x68a0 attr=0x00000005
+         @2 rw- 0xe0095280-0xe0095410 size=0x190 attr=0x00000006
+    [09] uid=0x40010299 complete SceNpManager
+         @1 r-x 0xe01ebff0-0xe01f37f0 size=0x7800 attr=0x00000005
+         @2 rw- 0xe0096800-0xe0097038 size=0x838 attr=0x00000006
+    [10] uid=0x40010293 complete SceLibSsl
+         @1 r-x 0xe0683e80-0xe06ead24 size=0x66ea4 attr=0x00000005
+         @2 rw- 0xe01a4470-0xe01a9418 size=0x4fa8 attr=0x00000006
+    [11] uid=0x4001028d complete tls_fixer_psn
+         @1 r-x 0x815ff000-0x815ff610 size=0x610 attr=0x00000005
+         @2 rw- 0x81695000-0x81695d10 size=0xd10 attr=0x00000006
+    [12] uid=0x40010281 complete SceLibHttp
+         @1 r-x 0xe060d000-0xe067653c size=0x6953c attr=0x00000005
+         @2 rw- 0xe0178000-0xe017cf94 size=0x4f94 attr=0x00000006
+    [13] uid=0x4001027d complete SceLibNetCtl
+         @1 r-x 0xe01691c0-0xe0175570 size=0xc3b0 attr=0x00000005
+         @2 rw- 0xe00b8d00-0xe00ba578 size=0x1878 attr=0x00000006
+    [14] uid=0x40010275 complete SceNet
+         @1 r-x 0xe05d3f70-0xe05e0200 size=0xc290 attr=0x00100005
+         @2 rw- 0xe005ed60-0xe005f9f0 size=0xc90 attr=0x00000006
+    [15] uid=0x40010269 complete SceDbutil
+         @1 r-x 0xe05a6110-0xe05cac58 size=0x24b48 attr=0x00000005
+         @2 rw- 0xe005d060-0xe005d224 size=0x1c4 attr=0x00000006
+    [16] uid=0x40010263 complete SceCommonGuiDialog
+         @1 r-x 0xe05279c0-0xe053602c size=0xe66c attr=0x00000005
+         @2 rw- 0xe005ae10-0xe005c3fc size=0x15ec attr=0x00000006
+    [17] uid=0x4001025d complete SceIniFileProcessor
+         @1 r-x 0xe009b350-0xe009f79c size=0x444c attr=0x00000005
+         @2 rw- 0xe0059080-0xe0059110 size=0x90 attr=0x00000006
+    [18] uid=0x40010257 complete ScebXCe
+         @1 r-x 0xe01d20f0-0xe01dd744 size=0xb654 attr=0x00000005
+         @2 rw- 0xe0058120-0xe00581d0 size=0xb0 attr=0x00000006
+    [19] uid=0x4001024b complete SceSqliteVsh
+         @1 r-x 0xe0542700-0xe05945f0 size=0x51ef0 attr=0x00000005
+         @2 rw- 0xe004e630-0xe004f458 size=0xe28 attr=0x00000006
+    [20] uid=0x40010241 complete SceCommonDialog
+         @1 r-x 0xe01b2750-0xe01c1c18 size=0xf4c8 attr=0x00000005
+         @2 rw- 0xe004d4c0-0xe004d7e1 size=0x321 attr=0x00000006
+    [21] uid=0x4001022d complete SceShellSvc
+         @1 r-x 0xe0187a80-0xe019a094 size=0x12614 attr=0x00000005
+         @2 rw- 0xe003eb50-0xe003f439 size=0x8e9 attr=0x00000006
+    [22] uid=0x40020089 complete ScePaf
+         @1 r-x 0xe02033c0-0xe05040c0 size=0x300d00 attr=0x00000005
+         @2 rw- 0xe00a0c00-0xe00b72d0 size=0x166d0 attr=0x00000006
+    [23] uid=0x40020069 complete livearea_search
+         @1 r-x 0x81838000-0x8184365c size=0xb65c attr=0x00000005
+         @2 rw- 0x815dc000-0x815dc054 size=0x54 attr=0x00000006
+    [24] uid=0x4002002b complete PasteUnlock
+         @1 r-x 0x815d7720-0x815d7afc size=0x3dc attr=0x00000005
+         @2 rw- 0x815dbdd0-0x815dbdd8 size=0x8 attr=0x00000006
+    [25] uid=0x400100c9 complete livearea_nolimits
+         @1 r-x 0x815d8000-0x815daac0 size=0x2ac0 attr=0x00000005
+         @2 rw- 0x81828000-0x81830410 size=0x8410 attr=0x00000006
+    [26] uid=0x400100c3 complete LowMemMode
+         @1 r-x 0x816e8000-0x816f0300 size=0x8300 attr=0x00000005
+         @2 rw- 0x815cf000-0x815cf018 size=0x18 attr=0x00000006
+    [27] uid=0x400100b9 complete DownloadEnabler
+         @1 r-x 0x816d8000-0x816e062c size=0x862c attr=0x00000005
+         @2 rw- 0x815a5000-0x815a5014 size=0x14 attr=0x00000006
+    [28] uid=0x400100ab complete pngshot
+         @1 r-x 0x81800000-0x81820ce4 size=0x20ce4 attr=0x00000005
+         @2 rw- 0x815a4000-0x815a4078 size=0x78 attr=0x00000006
+    [29] uid=0x400100a3 complete shellbat
+         @1 r-x 0x816c8000-0x816d0ab8 size=0x8ab8 attr=0x00000005
+         @2 rw- 0x815a3000-0x815a3068 size=0x68 attr=0x00000006
+    [30] uid=0x4001009d complete NoTrophyMsg
+         @1 r-x 0x816b8000-0x816c0324 size=0x8324 attr=0x00000005
+         @2 rw- 0x815a2000-0x815a2008 size=0x8 attr=0x00000006
+    [31] uid=0x40010095 complete NoLockScreen
+         @1 r-x 0x815a0000-0x815a0444 size=0x444 attr=0x00000005
+         @2 rw- 0x815a1000-0x815a1008 size=0x8 attr=0x00000006
+    [32] uid=0x40010087 complete vitacompanion
+         @1 r-x 0x815c0000-0x815cd4e8 size=0xd4e8 attr=0x00000005
+         @2 rw- 0x815d0000-0x815d6234 size=0x6234 attr=0x00000006
+    [33] uid=0x4001007f complete livearea_no_confirmation
+         @1 r-x 0x8159b000-0x8159b724 size=0x724 attr=0x00000005
+         @2 rw- 0x8159f000-0x8159f008 size=0x8 attr=0x00000006
+    [34] uid=0x40010071 complete HENkakuUser
+         @1 r-x 0x815b0000-0x815be9e8 size=0xe9e8 attr=0x00000005
+         @2 rw- 0x8159c000-0x8159e024 size=0x2024 attr=0x00000006
+    [35] uid=0x4001001b complete SceLibPvf
+         @1 r-x 0xe0149340-0xe0159254 size=0xff14 attr=0x00000005
+         @2 rw- 0xe001bca0-0xe001bca8 size=0x8 attr=0x00000006
+    [36] uid=0x40010019 complete SceLibft2
+         @1 r-x 0xe00c5060-0xe0115f64 size=0x50f04 attr=0x01d00005
+         @2 rw- 0xe001ef80-0xe001f274 size=0x2f4 attr=0x00000006
+    [37] uid=0x40010017 complete SceLibDbg
+         @1 r-x 0xe004b6c0-0xe004bc74 size=0x5b4 attr=0x00000005
+         @2 rw- 0xe0013570-0xe00135fc size=0x8c attr=0x00000006
+    [38] uid=0x40010015 complete SceGxm
+         @1 r-x 0xe0066b70-0xe008a874 size=0x23d04 attr=0x00000005
+         @2 rw- 0xe001c0a0-0xe001c7cc size=0x72c attr=0x00100006
+    [39] uid=0x40010013 complete SceGpuEs4User
+         @1 r-x 0xe0050d90-0xe0053594 size=0x2804 attr=0x00200005
+         @2 rw- 0xe00122a0-0xe00122dc size=0x3c attr=0x00000006
+    [40] uid=0x40010011 complete SceAvcodecUser
+         @1 r-x 0xe0015010-0xe0017500 size=0x24f0 attr=0x00000005
+    [41] uid=0x4001000f complete SceDriverUser
+         @1 r-x 0xe002e8a0-0xe003da74 size=0xf1d4 attr=0x00000005
+         @2 rw- 0xe0040f30-0xe0049e70 size=0x8f40 attr=0x00000006
+    [42] uid=0x4001000d complete SceLibKernel
+         @1 r-x 0xe0000340-0xe000ec18 size=0xe8d8 attr=0x00000005
+         @2 rw- 0xe00119d0-0xe0011a18 size=0x48 attr=0x00000006
+    [43] uid=0x40010001 complete SceShell
+         @1 r-x 0x81012180-0x81553cf4 size=0x541b74 attr=0x00000005
+         @2 rw- 0x81600160-0x8169410c size=0x93fac attr=0x00000006
+
+CAPTURED_MEMORY:
+    PT_LOAD ranges             : 137
+    ph21  rwx 0xe05e7000-0xe05e8000 captured=0x1000/0x1000 missing=0x0
+    ph22  rwx 0xe051d000-0xe051e000 captured=0x1000/0x1000 missing=0x0
+    ph23  rwx 0x823f7000-0x823fa000 captured=0x3000/0x3000 missing=0x0
+    ph24  rwx 0xe07f9000-0xe07fb000 captured=0x2000/0x2000 missing=0x0
+    ph25  rwx 0xe07cb000-0xe07ce000 captured=0x3000/0x3000 missing=0x0
+    ph26  rwx 0xe0770000-0xe0772000 captured=0x2000/0x2000 missing=0x0
+    ph27  rwx 0xe071c000-0xe071e000 captured=0x2000/0x2000 missing=0x0
+    ph28  rwx 0xe05fa000-0xe05fc000 captured=0x2000/0x2000 missing=0x0
+    ph29  rwx 0xe050f000-0xe0511000 captured=0x2000/0x2000 missing=0x0
+    ph30  rwx 0xe01f2000-0xe01f4000 captured=0x2000/0x2000 missing=0x0
+    ph31  rwx 0xe06d8000-0xe06dd000 captured=0x5000/0x5000 missing=0x0
+    ph32  rwx 0xe0675000-0xe0677000 captured=0x2000/0x2000 missing=0x0
+    ph33  rwx 0xe0174000-0xe0175000 captured=0x1000/0x1000 missing=0x0
+    ph34  rwx 0xe05df000-0xe05e1000 captured=0x2000/0x2000 missing=0x0
+    ph35  rwx 0xe05b8000-0xe05ba000 captured=0x2000/0x2000 missing=0x0
+    ph36  rwx 0xe0533000-0xe0535000 captured=0x2000/0x2000 missing=0x0
+    ph37  rwx 0xe009e000-0xe00a0000 captured=0x2000/0x2000 missing=0x0
+    ph38  rwx 0xe01db000-0xe01dd000 captured=0x2000/0x2000 missing=0x0
+    ph39  rwx 0xe058c000-0xe058f000 captured=0x3000/0x3000 missing=0x0
+    ph40  rwx 0xe01c0000-0xe01c1000 captured=0x1000/0x1000 missing=0x0
+    ph41  rwx 0xe0198000-0xe019a000 captured=0x2000/0x2000 missing=0x0
+    ph42  rwx 0xe047e000-0xe049b000 captured=0x1d000/0x1d000 missing=0x0
+    ph43  rwx 0x815d7000-0x815d8000 captured=0x1000/0x1000 missing=0x0
+    ph44  rwx 0x815cc000-0x815cd000 captured=0x1000/0x1000 missing=0x0
+    ph45  rwx 0xe0158000-0xe015a000 captured=0x2000/0x2000 missing=0x0
+    ph46  rwx 0xe0114000-0xe0116000 captured=0x2000/0x2000 missing=0x0
+    ph47  rwx 0xe004b000-0xe004c000 captured=0x1000/0x1000 missing=0x0
+    ph48  rwx 0xe0089000-0xe008b000 captured=0x2000/0x2000 missing=0x0
+    ph49  rwx 0xe0052000-0xe0054000 captured=0x2000/0x2000 missing=0x0
+    ph50  rwx 0xe0016000-0xe0018000 captured=0x2000/0x2000 missing=0x0
+    ph51  rwx 0xe003c000-0xe003e000 captured=0x2000/0x2000 missing=0x0
+    ph52  rwx 0xe000d000-0xe000f000 captured=0x2000/0x2000 missing=0x0
+    ph53  rwx 0x814e3000-0x81514000 captured=0x31000/0x31000 missing=0x0
+    ph54  rwx 0x81595000-0x8159b000 captured=0x6000/0x6000 missing=0x0
+    ph55  rwx 0x81595000-0x8159b000 captured=0x6000/0x6000 missing=0x0
+    ph56  rwx 0x81851000-0x81861000 captured=0x10000/0x10000 missing=0x0
+    ph57  rwx 0x81851000-0x81861000 captured=0x10000/0x10000 missing=0x0
+    ph58  rwx 0x815e1000-0x815f1000 captured=0x10000/0x10000 missing=0x0
+    ph59  rwx 0x815e1000-0x815f1000 captured=0x10000/0x10000 missing=0x0
+    ph60  rwx 0x816a1000-0x816b1000 captured=0x10000/0x10000 missing=0x0
+    ph61  rwx 0x816a1000-0x816b1000 captured=0x10000/0x10000 missing=0x0
+    ph62  rwx 0x815f5000-0x815f9000 captured=0x4000/0x4000 missing=0x0
+    ph63  rwx 0x815f5000-0x815f9000 captured=0x4000/0x4000 missing=0x0
+    ph64  rwx 0x815f3000-0x815f4000 captured=0x1000/0x1000 missing=0x0
+    ph65  rwx 0x815f3000-0x815f4000 captured=0x1000/0x1000 missing=0x0
+    ph66  rwx 0x81699000-0x8169d000 captured=0x4000/0x4000 missing=0x0
+    ph67  rwx 0x81699000-0x8169d000 captured=0x4000/0x4000 missing=0x0
+    ph68  rwx 0x815fb000-0x815fd000 captured=0x2000/0x2000 missing=0x0
+    ph69  rwx 0x815fb000-0x815fd000 captured=0x2000/0x2000 missing=0x0
+    ph70  rwx 0x816b3000-0x816b5000 captured=0x2000/0x2000 missing=0x0
+    ph71  rwx 0x816b3000-0x816b5000 captured=0x2000/0x2000 missing=0x0
+    ph72  rwx 0x82161000-0x8216d000 captured=0xc000/0xc000 missing=0x0
+    ph73  rwx 0x82161000-0x8216d000 captured=0xc000/0xc000 missing=0x0
+    ph74  rwx 0x821f5000-0x821f9000 captured=0x4000/0x4000 missing=0x0
+    ph75  rwx 0x821f5000-0x821f9000 captured=0x4000/0x4000 missing=0x0
+    ph76  rwx 0x816f5000-0x816f9000 captured=0x4000/0x4000 missing=0x0
+    ph77  rwx 0x816f5000-0x816f9000 captured=0x4000/0x4000 missing=0x0
+    ph78  rwx 0x81845000-0x81849000 captured=0x4000/0x4000 missing=0x0
+    ph79  rwx 0x81845000-0x81849000 captured=0x4000/0x4000 missing=0x0
+    ph80  rwx 0x816d7000-0x816d8000 captured=0x1000/0x1000 missing=0x0
+    ph81  rwx 0x816d7000-0x816d8000 captured=0x1000/0x1000 missing=0x0
+    ph82  rwx 0x82171000-0x82175000 captured=0x4000/0x4000 missing=0x0
+    ph83  rwx 0x82171000-0x82175000 captured=0x4000/0x4000 missing=0x0
+    ph84  rwx 0x82179000-0x8217d000 captured=0x4000/0x4000 missing=0x0
+    ph85  rwx 0x82179000-0x8217d000 captured=0x4000/0x4000 missing=0x0
+    ph86  rwx 0x816d3000-0x816d5000 captured=0x2000/0x2000 missing=0x0
+    ph87  rwx 0x816d3000-0x816d5000 captured=0x2000/0x2000 missing=0x0
+    ph88  rwx 0x816e3000-0x816e5000 captured=0x2000/0x2000 missing=0x0
+    ph89  rwx 0x816e3000-0x816e5000 captured=0x2000/0x2000 missing=0x0
+    ph90  rwx 0x816b7000-0x816b8000 captured=0x1000/0x1000 missing=0x0
+    ph91  rwx 0x816b7000-0x816b8000 captured=0x1000/0x1000 missing=0x0
+    ph92  rwx 0x82385000-0x82389000 captured=0x4000/0x4000 missing=0x0
+    ph93  rwx 0x82385000-0x82389000 captured=0x4000/0x4000 missing=0x0
+    ph94  rwx 0x81823000-0x81825000 captured=0x2000/0x2000 missing=0x0
+    ph95  rwx 0x81823000-0x81825000 captured=0x2000/0x2000 missing=0x0
+    ph96  rwx 0x8238d000-0x82391000 captured=0x4000/0x4000 missing=0x0
+    ph97  rwx 0x8238d000-0x82391000 captured=0x4000/0x4000 missing=0x0
+    ph98  rwx 0x82395000-0x82399000 captured=0x4000/0x4000 missing=0x0
+    ph99  rwx 0x82395000-0x82399000 captured=0x4000/0x4000 missing=0x0
+    ph100 rwx 0x8239d000-0x823a1000 captured=0x4000/0x4000 missing=0x0
+    ph101 rwx 0x8239d000-0x823a1000 captured=0x4000/0x4000 missing=0x0
+    ph102 rwx 0x823a5000-0x823a9000 captured=0x4000/0x4000 missing=0x0
+    ph103 rwx 0x823a5000-0x823a9000 captured=0x4000/0x4000 missing=0x0
+    ph104 rwx 0x823ad000-0x823b1000 captured=0x4000/0x4000 missing=0x0
+    ph105 rwx 0x823ad000-0x823b1000 captured=0x4000/0x4000 missing=0x0
+    ph106 rwx 0x823b5000-0x823b9000 captured=0x4000/0x4000 missing=0x0
+    ph107 rwx 0x823b5000-0x823b9000 captured=0x4000/0x4000 missing=0x0
+    ph108 rwx 0x82405000-0x82409000 captured=0x4000/0x4000 missing=0x0
+    ph109 rwx 0x82405000-0x82409000 captured=0x4000/0x4000 missing=0x0
+    ph110 rwx 0x81833000-0x81835000 captured=0x2000/0x2000 missing=0x0
+    ph111 rwx 0x81833000-0x81835000 captured=0x2000/0x2000 missing=0x0
+    ph112 rwx 0x8184b000-0x8184d000 captured=0x2000/0x2000 missing=0x0
+    ph113 rwx 0x8184b000-0x8184d000 captured=0x2000/0x2000 missing=0x0
+    ph114 rwx 0x81865000-0x81868000 captured=0x3000/0x3000 missing=0x0
+    ph115 rwx 0x81865000-0x81868000 captured=0x3000/0x3000 missing=0x0
+    ph116 rwx 0x82651000-0x82655000 captured=0x4000/0x4000 missing=0x0
+    ph117 rwx 0x82651000-0x82655000 captured=0x4000/0x4000 missing=0x0
+    ph118 rwx 0x82479000-0x8247d000 captured=0x4000/0x4000 missing=0x0
+    ph119 rwx 0x82479000-0x8247d000 captured=0x4000/0x4000 missing=0x0
+    ph120 rwx 0x82441000-0x82445000 captured=0x4000/0x4000 missing=0x0
+    ph121 rwx 0x82441000-0x82445000 captured=0x4000/0x4000 missing=0x0
+    ph122 rwx 0x82449000-0x8244d000 captured=0x4000/0x4000 missing=0x0
+    ph123 rwx 0x82449000-0x8244d000 captured=0x4000/0x4000 missing=0x0
+    ph124 rwx 0x81837000-0x81838000 captured=0x1000/0x1000 missing=0x0
+    ph125 rwx 0x81837000-0x81838000 captured=0x1000/0x1000 missing=0x0
+    ph126 rwx 0x81875000-0x81877000 captured=0x2000/0x2000 missing=0x0
+    ph127 rwx 0x81875000-0x81877000 captured=0x2000/0x2000 missing=0x0
+    ph128 rwx 0x82451000-0x82455000 captured=0x4000/0x4000 missing=0x0
+    ph129 rwx 0x82451000-0x82455000 captured=0x4000/0x4000 missing=0x0
+    ph130 rwx 0x82459000-0x8245d000 captured=0x4000/0x4000 missing=0x0
+    ph131 rwx 0x82459000-0x8245d000 captured=0x4000/0x4000 missing=0x0
+    ph132 rwx 0x82461000-0x82465000 captured=0x4000/0x4000 missing=0x0
+    ph133 rwx 0x82461000-0x82465000 captured=0x4000/0x4000 missing=0x0
+    ph134 rwx 0x821fb000-0x821fd000 captured=0x2000/0x2000 missing=0x0
+    ph135 rwx 0x821fb000-0x821fd000 captured=0x2000/0x2000 missing=0x0
+    ph136 rwx 0x81863000-0x81864000 captured=0x1000/0x1000 missing=0x0
+    ph137 rwx 0x81863000-0x81864000 captured=0x1000/0x1000 missing=0x0
+    ph138 rwx 0x823bb000-0x823bd000 captured=0x2000/0x2000 missing=0x0
+    ph139 rwx 0x823bb000-0x823bd000 captured=0x2000/0x2000 missing=0x0
+    ph140 rwx 0x82469000-0x8246d000 captured=0x4000/0x4000 missing=0x0
+    ph141 rwx 0x82469000-0x8246d000 captured=0x4000/0x4000 missing=0x0
+    ph142 rwx 0x82471000-0x82475000 captured=0x4000/0x4000 missing=0x0
+    ph143 rwx 0x82471000-0x82475000 captured=0x4000/0x4000 missing=0x0
+    ph144 rwx 0x8216f000-0x82170000 captured=0x1000/0x1000 missing=0x0
+    ph145 rwx 0x8216f000-0x82170000 captured=0x1000/0x1000 missing=0x0
+    ph146 rwx 0x82659000-0x8265d000 captured=0x4000/0x4000 missing=0x0
+    ph147 rwx 0x82659000-0x8265d000 captured=0x4000/0x4000 missing=0x0
+    ph148 rwx 0x8217f000-0x82180000 captured=0x1000/0x1000 missing=0x0
+    ph149 rwx 0x8217f000-0x82180000 captured=0x1000/0x1000 missing=0x0
+    ph150 rwx 0x821ff000-0x82200000 captured=0x1000/0x1000 missing=0x0
+    ph151 rwx 0x821ff000-0x82200000 captured=0x1000/0x1000 missing=0x0
+    ph152 rwx 0x82393000-0x82394000 captured=0x1000/0x1000 missing=0x0
+    ph153 rwx 0x82393000-0x82394000 captured=0x1000/0x1000 missing=0x0
+    ph154 rwx 0x81909000-0x8190b000 captured=0x2000/0x2000 missing=0x0
+    ph155 rwx 0x81932000-0x81934000 captured=0x2000/0x2000 missing=0x0
+    ph156 rwx 0x81999000-0x8199b000 captured=0x2000/0x2000 missing=0x0
+    ph157 rwx 0x819ba000-0x819bc000 captured=0x2000/0x2000 missing=0x0
+    Memory blocks              : 38 / 38
+    [00] 0x815a8000-0x815b0000 size=0x8000 captured=0x0 uid=0x40010059 SceGpuUserHeap
+    [01] 0x81700000-0x81800000 size=0x100000 captured=0x0 uid=0x4001008b vitacompanion_heap
+    [02] 0x81900000-0x81e00000 size=0x500000 captured=0x8000 uid=0x40010109 ScePafGlobalHeap
+    [03] 0x70000000-0x70100000 size=0x100000 captured=0x0 uid=0x400101ad SceGxmDriver
+    [04] 0x60000000-0x60200000 size=0x200000 captured=0x0 uid=0x400101af SceGxmParamBuffer
+    [05] 0x81e00000-0x81f00000 size=0x100000 captured=0x0 uid=0x400101b9 ScePafFontRasterizerPvfHeap
+    [06] 0x81f00000-0x8215e000 size=0x25e000 captured=0x0 uid=0x400101bd SceSysDefaultJpnFont
+    [07] 0x81868000-0x81873000 size=0xb000 captured=0x0 uid=0x400101c1 SceSysDefaultLtnFont
+    [08] 0x60200000-0x60300000 size=0x100000 captured=0x0 uid=0x400101c9 ScePafTextSurfaceCache
+    [09] 0x60300000-0x60400000 size=0x100000 captured=0x0 uid=0x400101d1 ScePafGraphMemVideo
+    [10] 0x70100000-0x70200000 size=0x100000 captured=0x0 uid=0x400101d5 ScePafGxmRingBuffer
+    [11] 0x70200000-0x70204000 size=0x4000 captured=0x0 uid=0x400101d9 ScePafGxmRingFragUsse
+    [12] 0x70240000-0x70280000 size=0x40000 captured=0x0 uid=0x400101db ScePafGxmRingFragUsse
+    [13] 0x70210000-0x70220000 size=0x10000 captured=0x0 uid=0x400101dd ScePafGxmShaderPatcherVertUsse
+    [14] 0x70220000-0x70230000 size=0x10000 captured=0x0 uid=0x400101df ScePafGxmShaderPatcherFragUsse
+    [15] 0x60400000-0x60440000 size=0x40000 captured=0x0 uid=0x400101e1 ScePafDefaultSurfacePool
+    [16] 0x60440000-0x60940000 size=0x500000 captured=0x0 uid=0x400101e7 SceSharedFb
+    [17] 0x70280000-0x702ad000 size=0x2d000 captured=0x0 uid=0x400101ed ScePafSurfaceRenderTarget
+    [18] 0x82200000-0x82300000 size=0x100000 captured=0x0 uid=0x400101f5 ScePafFwDecodeHeap
+    [19] 0x81880000-0x81900000 size=0x80000 captured=0x0 uid=0x400101f9 ScePafFwDefaultPluginHeap
+    [20] 0x70300000-0x70700000 size=0x400000 captured=0x0 uid=0x40010211 SceShellExclusiveFuncMemBlock
+    [21] 0x60940000-0x60a00000 size=0xc0000 captured=0x0 uid=0x4001021d ScePafCRSurfacePool
+    [22] 0x815fe000-0x815ff000 size=0x1000 captured=0x0 uid=0x40010223 ScePafCRSurfacePoolOffset
+    [23] 0x82300000-0x82382000 size=0x82000 captured=0x0 uid=0x4001022b ScePafCRSoundDataStorage
+    [24] 0x816c4000-0x816c8000 size=0x4000 captured=0x0 uid=0x4001023f SceTextClipboardStorage
+    [25] 0x81878000-0x81880000 size=0x8000 captured=0x0 uid=0x40020379 SceTriggerMgrHeap
+    [26] 0x82500000-0x8264e000 size=0x14e000 captured=0x0 uid=0x40020381 SceNpSystem
+    [27] 0x816fc000-0x81700000 size=0x4000 captured=0x0 uid=0x400103c3 SceNetStun
+    [28] 0x82180000-0x821df000 size=0x5f000 captured=0x0 uid=0x400103cd SceLibsslGlobalHeap
+    [29] 0x821e0000-0x821f4000 size=0x14000 captured=0x0 uid=0x400103d3 SceLibhttpGlobalHeap
+    [30] 0x82480000-0x82500000 size=0x80000 captured=0x0 uid=0x40010411 SceNpFriendVshMemBlock
+    [31] 0x82410000-0x8241d000 size=0xd000 captured=0x0 uid=0x4001046d SceNpGlobalHeap
+    [32] 0x82420000-0x82440000 size=0x20000 captured=0x0 uid=0x40010473 SceNpPushHeap
+    [33] 0x81826000-0x81827000 size=0x1000 captured=0x0 uid=0x40010487 SceNpShell
+    [34] 0x82680000-0x82700000 size=0x80000 captured=0x0 uid=0x4001053d SceNpTrophyServer
+    [35] 0x82700000-0x82740000 size=0x40000 captured=0x0 uid=0x400105ab SceNpIpc2ServerHeap
+    [36] 0x82176000-0x82177000 size=0x1000 captured=0x0 uid=0x400205ff SceShutterSoundHeapAllocator
+    [37] 0x70700000-0x708fe000 size=0x1fe000 captured=0x0 uid=0x4001060b SceScreenShotBuffer
+
+CAPTURED_LIBRARY_SET:
+    Libraries                  : 79 / 79
+    Total NID/address entries  : 9925
+        SceJpegEncArm[9], ScePhotoExport[10], SceLsdb[199]
+        SceNpWebApi[63], SceNpCommonPs4[722], SceActivityDb[78]
+        SceNpActivityNet[30], SceNpUtilityAvatarN[2], SceNpUtility[140]
+        SceNpCommon[71], SceNpManagerTicket[5], SceNpManagerOAuth[1]
+        SceNpManagerSP[1], SceNpManager[91], SceSslInternal[98]
+        SceSsl[11], tls_fixer_embedded[22], SceHttp[116]
+        SceNetCtl[112], SceNetInternal[58], SceNet[62]
+        SceDbutil[231], SceCommonGuiDialog[88], SceIniFileProcessor[24]
+        ScebXCe[198], SceSqliteVsh[141], SceNpWebApiCommonDialog[10]
+        SceCommonDialog[163], SceIpmi[90], SceSvcCtrl[4]
+        SceShellUtilLaunchApp[1], SceShellUtilUketorne[7], SceShellUtil[40]
+        SceShellSvc[10], ScePafWidget[2758], ScePafToplevel[206]
+        ScePafResource[325], ScePafThread[103], ScePafGraphics[749]
+        ScePafCommon[192], ScePafMisc[1119], ScePafStdc[166]
+        ScePafLowlayer[20], ScePvf[43], SceFt2[166]
+        SceDbg[5], SceGxmInternalForVsh[5], SceGxmInternalForTest[15]
+        SceGxmInternalForReplay[1], SceGxmInternalForGles[1], SceGxmInternal[16]
+        SceGxm[267], SceGpuEs4UserForVsh[5], SceGpuEs4User[49]
+        SceCodecEngineUser[6], SceVideodecLowDelayUser[1], SceVideodecRecoveryPointUser[1]
+        SceVideodecAsyncUser[6], SceVideoencUser[21], SceVideodecUser[56]
+        SceJpegEncUser[10], SceJpegUser[11], SceAudioencUser[14]
+        SceAudiodecUser[15], SceDrmBridgeUser[5], SceAppMgrUser[128]
+        SceMotion[41], SceErrorUser[6], SceDisplayUser[7]
+        SceRtcUser[44], SceFios2User[10], SceKernelForMono[6]
+        SceLibRng[1], SceKernelForVM[3], SceRtabi[16]
+        SceLibSsp[2], SceLibGcc[20], SceLibKernel[343]
+        SceShell[33]
+    Use `libraries --nid/--address` for exact entry-level lookup; all pairs are present in JSON.
+
+FILE_RECORDS:
+    Files                      : 7 / 7
+        uid=0x40010007 pid=0x00010005 status=0x00000000 <empty producer strings>
+        uid=0x40010009 pid=0x00010005 status=0x00000000 <empty producer strings>
+        uid=0x4001000b pid=0x00010005 status=0x00000000 <empty producer strings>
+        uid=0x4001020b pid=0x00041b95 status=0x00000000 <empty producer strings>
+        uid=0x40010249 pid=0x00041b95 status=0x00000000 <empty producer strings>
+        uid=0x40020363 pid=0x00041b95 status=0x00000000 <empty producer strings>
+        uid=0x400105ef pid=0x00041b95 status=0x00000000 <empty producer strings>
+
+SYSTEM_EVENT_RECORDS:
+    Format / records           : 9 / 6
+    Capture status             : 0x00000000
+    [00] title=NPXS19999 flags=0x00012711 ppid=0x00010005 time=0x0000000000f3e4b8 item=process(main)
+         data@04=0x0000000a data@1c=0x00010215 data@38=0x00000000 item-size=0x1c reserved@20=0x00000000 0x00000000 0x00000000 0x00000000
+         item pid=0x00041b95 budget-type=0x04000000 data@40=0x00000000 data@4c=0x0000000a
+    [01] title=NPXS19999 flags=0x00014e21 ppid=0x00010005 time=0x00000000003932bc item=network-word
+         data@04=0x0000000a data@1c=0x00020f67 data@38=0x00000000 item-size=0x4 reserved@20=0x00000000 0x00000000 0x00000000 0x00000000
+         item data@40=0x00000000
+    [02] title=NPXS19999 flags=0x00024e21 ppid=0x00010005 time=0x0000000000395271 item=network-word
+         data@04=0x0000000a data@1c=0x00020f67 data@38=0x00000000 item-size=0x4 reserved@20=0x00000000 0x00000000 0x00000000 0x00000000
+         item data@40=0x00000000
+    [03] title=NPXS19999 flags=0x00014e21 ppid=0x00010005 time=0x000000000039532e item=network-word
+         data@04=0x0000000a data@1c=0x00020f67 data@38=0x00000000 item-size=0x4 reserved@20=0x00000000 0x00000000 0x00000000 0x00000000
+         item data@40=0x00000000
+    [04] title=NPXS19999 flags=0x00034e21 ppid=0x00010005 time=0x00000000003932dc item=network-word
+         data@04=0x0000000a data@1c=0x000209a3 data@38=0x00000000 item-size=0x4 reserved@20=0x00000000 0x00000000 0x00000000 0x00000000
+         item data@40=0x00000000
+    [05] title=NPXS19999 flags=0x00042711 ppid=0x00010005 time=0x000000000167428c item=process(main)
+         data@04=0x0000000a data@1c=0x0001049f data@38=0x00000000 item-size=0x1c reserved@20=0x00000000 0x00000000 0x00000000 0x00000000
+         item pid=0x00041b95 budget-type=0x04000000 data@40=0x00000000 data@4c=0x0000000a
+    Ring padding               : 0x638; nonzero=0
+    Record order and SceKernelDebugEventLog fields are preserved; raw words/hashes remain in JSON.
+
+PROCESS_MEMORY_BUDGET_RECORDS:
+    Budgets                    : 3 / 3
+    SceProcessmgrKernelBudget uid=0x00010059:
+        ScePhyMemPartKD uid=0x0001000f word@28=0x0001001a regions=1
+            [0] 0x40200000 0x02400000 0x00241000 0x00231000 0x00000001
+    SceProcessmgrShellBudget uid=0x0001005b:
+        ScePhyMemPartShell uid=0x000102ab word@28=0x00010002 regions=1
+            [0] 0x45100000 0x03200000 0x010cd000 0x00fbf000 0x00000001
+        ScePhyMemPartShellCdram uid=0x000102af word@28=0x00030002 regions=1
+            [0] 0x27000000 0x01000000 0x00600000 0x00600000 0x00000000
+    SceProcessmgrFullGameBudget uid=0x0001005d:
+        ScePhyMemPartGame uid=0x000102ad word@28=0x00010004 regions=1
+            [0] 0x50000000 0x10000000 0x10000000 0x0fcf8000 0x00000001
+        ScePhyMemPartGameCDialog uid=0x000102a9 word@28=0x00010064 regions=1
+            [0] 0x44800000 0x00900000 0x00900000 0x008f8000 0x00000001
+        ScePhyMemPartPhyCont uid=0x000102a5 word@28=0x00010005 regions=1
+            [0] 0x42600000 0x01a00000 0x01a00000 0x01600000 0x00000001
+        ScePhyMemPartGameCdram uid=0x000102b1 word@28=0x00030004 regions=1
+            [0] 0x20000000 0x07000000 0x07000000 0x07000000 0x00000000
+    Region slots are exact producer words; size/free/utilization semantics are not inferred.
+
+DEVICE_RECORDS:
+    DEVICE list 0: empty
+    DEVICE list 1: 0x00041b95
+    SYS_DEVICE [0] size=0x40 System Device VITA Card Info.
+        payload: 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000
+    SYS_DEVICE [1] size=0x70 System Device Memory Card Info.
+        payload: 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000
+
+ASYNCHRONOUS_KERNEL_OBJECTS:
+    Callbacks                  : 21
+        callback uid=0x40010187 pid=0x00041b95 thread=0x40010005 SceRtcUtilRegistryCallback
+        callback uid=0x4001018f pid=0x00041b95 thread=0x4001018d SceShellCronCallback
+        callback uid=0x40010191 pid=0x00041b95 thread=0x4001018d SceShellCronCallback
+        callback uid=0x40010197 pid=0x00041b95 thread=0x40010005 SceShellMediaDetectMgrUxMount
+        callback uid=0x4001019b pid=0x00041b95 thread=0x40010005 SceShellMediaDetectMgrGroMount
+        callback uid=0x4001019f pid=0x00041b95 thread=0x40010005 SceShellMediaDetectMgrIoError
+        callback uid=0x400101fd pid=0x00041b95 thread=0x40010005 ScePafHidkeyboardEnumHint
+        callback uid=0x400101ff pid=0x00041b95 thread=0x40010005 ScePafHidkeyboardReadHint
+        callback uid=0x4001020d pid=0x00041b95 thread=0x40010005 ScePafPowerCallback
+        callback uid=0x40010219 pid=0x00041b95 thread=0x40010005 SceLsdbRegCb
+        callback uid=0x4001021b pid=0x00041b95 thread=0x40010005 SceMtpWiFiRegCB
+        callback uid=0x4001030b pid=0x00041b95 thread=0x400102cb SceShellSvcIpmi00041b95
+        callback uid=0x40010355 pid=0x00041b95 thread=0x40010329 SceDbUtilDcnIpmi00041b95
+        callback uid=0x400103ef pid=0x00041b95 thread=0x400103b3 SceNetEventCallback400103B3
+        callback uid=0x400103f1 pid=0x00041b95 thread=0x400103b3 SceNetEventCallback400103B3
+        callback uid=0x400103f3 pid=0x00041b95 thread=0x400103b3 SceNetCtl
+        callback uid=0x400103f7 pid=0x00041b95 thread=0x400103af SceNetEventCallback400103AF
+        callback uid=0x400103f9 pid=0x00041b95 thread=0x400103af SceNetEventCallback400103AF
+        callback uid=0x400103fb pid=0x00041b95 thread=0x400103af SceNetCtl
+        callback uid=0x400104f9 pid=0x00041b95 thread=0x4001040d SceNpManagerIpmi00041b95
+        callback uid=0x40010537 pid=0x00041b95 thread=0x40010457 SceNpImpsUtilIpmi00041b95
+    Timers                     : 1
+        timer uid=0x4001018b pid=0x00041b95 waiters=none SceShellCronCallback
+
+KERNEL_OBJECTS_AND_WAIT_GRAPH:
+    Tables / objects           : 7 / 495
+    Kinds                      : semaphore=87, event-flag=41, mutex=62, lightweight-mutex=223, condition-variable=5, lightweight-condition-variable=17, message-pipe=60
+    Active objects             : 42
+    0x40010189 semaphore                owner=unavailable waiters=1 SceShellCronCallback
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_count=0x00000000 current_count=0x00000000 maximum_count=0x00ffffff wait_threads=0x00000001
+    0x400102c9 semaphore                owner=unavailable waiters=1 SceShellSvcServerDC
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_count=0x00000000 current_count=0x00000000 maximum_count=0x00ffffff wait_threads=0x00000001
+    0x40010327 semaphore                owner=unavailable waiters=1 SceDbUtilDcnServerDC
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_count=0x00000000 current_count=0x00000000 maximum_count=0x00ffffff wait_threads=0x00000001
+    0x40020375 semaphore                owner=unavailable waiters=1 ScePafJobThread
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_count=0x00000000 current_count=0x00000000 maximum_count=0x00000001 wait_threads=0x00000001
+    0x40020391 semaphore                owner=unavailable waiters=1 SceNpScoreServerDC
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_count=0x00000000 current_count=0x00000000 maximum_count=0x00ffffff wait_threads=0x00000001
+    0x400203f5 semaphore                owner=unavailable waiters=1 SceNpTusServerDC
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_count=0x00000000 current_count=0x00000000 maximum_count=0x00ffffff wait_threads=0x00000001
+    0x4001040b semaphore                owner=unavailable waiters=1 SceNpManagerServerDC
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_count=0x00000000 current_count=0x00000000 maximum_count=0x00ffffff wait_threads=0x00000001
+    0x40010455 semaphore                owner=unavailable waiters=1 SceNpImpsUtilServerDC
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_count=0x00000000 current_count=0x00000000 maximum_count=0x00ffffff wait_threads=0x00000001
+    0x40030517 semaphore                owner=unavailable waiters=1 ScePafJobThread
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_count=0x00000000 current_count=0x00000000 maximum_count=0x00000001 wait_threads=0x00000001
+    0x40010551 semaphore                owner=unavailable waiters=1 SceNpTrophyServerDC
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_count=0x00000000 current_count=0x00000000 maximum_count=0x00ffffff wait_threads=0x00000001
+    0x4001055b semaphore                owner=unavailable waiters=1 SceNpPartyUtilServerDC
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_count=0x00000000 current_count=0x00000000 maximum_count=0x00ffffff wait_threads=0x00000001
+    0x40010569 semaphore                owner=unavailable waiters=1 ScePafJobThread
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_count=0x00000000 current_count=0x00000000 maximum_count=0x00000001 wait_threads=0x00000001
+    0x4001057b semaphore                owner=unavailable waiters=1 SceNpSnsFbServerDC
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_count=0x00000000 current_count=0x00000000 maximum_count=0x00ffffff wait_threads=0x00000001
+    0x4001058b semaphore                owner=unavailable waiters=1 SceNpCommerce2SM
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_count=0x00000000 current_count=0x00000000 maximum_count=0x00000008 wait_threads=0x00000001
+    0x400105b7 semaphore                owner=unavailable waiters=1 SceNpServiceServerDC
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_count=0x00000000 current_count=0x00000000 maximum_count=0x00ffffff wait_threads=0x00000001
+    0x400205e5 semaphore                owner=unavailable waiters=1 ScePafJobThread
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_count=0x00000000 current_count=0x00000000 maximum_count=0x00000001 wait_threads=0x00000001
+    0x400205f1 semaphore                owner=unavailable waiters=1 ScePafJobThread
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_count=0x00000000 current_count=0x00000000 maximum_count=0x00000001 wait_threads=0x00000001
+    0x40010613 semaphore                owner=unavailable waiters=1 SceScreenShotServerDC
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_count=0x00000000 current_count=0x00000000 maximum_count=0x00ffffff wait_threads=0x00000001
+    0x40010625 semaphore                owner=unavailable waiters=1 SceImeServiceServerDC
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_count=0x00000000 current_count=0x00000000 maximum_count=0x00ffffff wait_threads=0x00000001
+    0x40010207 event-flag               owner=unavailable waiters=1 SceWaveMainEvf
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_pattern=0x00000000 current_pattern=0x00000000 wait_threads=0x00000001
+    0x4001033d event-flag               owner=unavailable waiters=1 SceDbUtilDcn00041b95EVF0100
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_pattern=0x00000000 current_pattern=0x00000000 wait_threads=0x00000001
+    0x400103ad event-flag               owner=unavailable waiters=1 SceNetCtlInet
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_pattern=0x00000000 current_pattern=0x00000000 wait_threads=0x00000001
+    0x400103b1 event-flag               owner=unavailable waiters=1 SceNetCtlAdhoc
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_pattern=0x00000000 current_pattern=0x00000000 wait_threads=0x00000001
+    0x400103c9 event-flag               owner=unavailable waiters=1 SceNetUpnp
+        state: capture_status=0x00000000 producer_word=0x00000000 initial_pattern=0x00000000 current_pattern=0x00000000 wait_threads=0x00000001
+    0x40010431 lightweight-mutex        owner=0x40010435 waiters=0 SceNpRosterTransaction
+        state: capture_status=0x00000000 work_address=0x816821d0 initial_count=0x00000000 current_count=0x00000001 current_owner_id=0x40010435 wait_threads=0x00000000
+    0x400105f5 lightweight-mutex        owner=0x40010435 waiters=0 ScePafHttpFileCsLock
+        state: capture_status=0x00000000 work_address=0x81993540 initial_count=0x00000000 current_count=0x00000001 current_owner_id=0x40010435 wait_threads=0x00000000
+    0x40030369 condition-variable       owner=unavailable waiters=1 SceNpManager
+        state: capture_status=0x00000000 producer_word=0x00000000 associated_mutex_uid=0x4003036b wait_threads=0x00000001
+    0x40010417 condition-variable       owner=unavailable waiters=1 SceNetCallout
+        state: capture_status=0x00000000 producer_word=0x00000000 associated_mutex_uid=0x40010415 wait_threads=0x00000001
+    0x4001047d condition-variable       owner=unavailable waiters=1 SceNpPushCtlCmdQueue
+        state: capture_status=0x00000000 producer_word=0x00000000 associated_mutex_uid=0x40010479 wait_threads=0x00000001
+    0x400101c7 lightweight-condition-variable owner=unavailable waiters=1 ScePafTextQueueCond
+        state: capture_status=0x00000000 work_address=0x00000000 associated_lwmutex_uid=0x400101c5 wait_threads=0x00000001 producer_word_0=0x8190a82c producer_word_1=0x8190a808
+    0x400101eb lightweight-condition-variable owner=unavailable waiters=1 ScePafDisplaySurfaceCond
+        state: capture_status=0x00000000 work_address=0x00000000 associated_lwmutex_uid=0x400101e9 wait_threads=0x00000001 producer_word_0=0x819298bc producer_word_1=0x81929898
+    0x40010401 lightweight-condition-variable owner=unavailable waiters=1 SceNpManagerServerJob
+        state: capture_status=0x00000000 work_address=0x00000000 associated_lwmutex_uid=0x40040383 wait_threads=0x00000001 producer_word_0=0x81988548 producer_word_1=0x81988528
+    0x40010445 lightweight-condition-variable owner=unavailable waiters=1 SceNpImpsSvcContextManagerCond
+        state: capture_status=0x00000000 work_address=0x00000000 associated_lwmutex_uid=0x40010443 wait_threads=0x00000001 producer_word_0=0x8248069c producer_word_1=0x82480678
+    0x40010465 lightweight-condition-variable owner=unavailable waiters=1 SceNpImpsUtilMPStateCMtx
+        state: capture_status=0x00000000 work_address=0x00000000 associated_lwmutex_uid=0x40010463 wait_threads=0x00000001 producer_word_0=0x824e682c producer_word_1=0x824e6808
+    0x40010547 lightweight-condition-variable owner=unavailable waiters=1 SceNpTrophyWorkQueue
+        state: capture_status=0x00000000 work_address=0x00000000 associated_lwmutex_uid=0x40010545 wait_threads=0x00000001 producer_word_0=0x826810f8 producer_word_1=0x826810d8
+    0x40010563 lightweight-condition-variable owner=unavailable waiters=1 SceNpPartyVSHNewIndicator
+        state: capture_status=0x00000000 work_address=0x00000000 associated_lwmutex_uid=0x40010561 wait_threads=0x00000001 producer_word_0=0x816860f8 producer_word_1=0x816860d8
+    0x40010571 lightweight-condition-variable owner=unavailable waiters=1 SceNpSnsFbServerJob
+        state: capture_status=0x00000000 work_address=0x00000000 associated_lwmutex_uid=0x4001056f wait_threads=0x00000001 producer_word_0=0x8251c998 producer_word_1=0x8251c978
+    0x400105c9 lightweight-condition-variable owner=unavailable waiters=1 SceLsdbActQueueEmpty
+        state: capture_status=0x00000000 work_address=0x00000000 associated_lwmutex_uid=0x400105c7 wait_threads=0x00000001 producer_word_0=0x8198b94c producer_word_1=0x8198b928
+    0x400105d9 lightweight-condition-variable owner=unavailable waiters=1 SceLsdbActNetQueueEmpty
+        state: capture_status=0x00000000 work_address=0x00000000 associated_lwmutex_uid=0x400105d7 wait_threads=0x00000001 producer_word_0=0x8198bc34 producer_word_1=0x8198bc10
+    0x4001063b lightweight-condition-variable owner=unavailable waiters=1 SceShellPlaylogFileAccessThread
+        state: capture_status=0x00000000 work_address=0x00000000 associated_lwmutex_uid=0x40010639 wait_threads=0x00000001 producer_word_0=0x8199a16c producer_word_1=0x8199a148
+    0x40030373 message-pipe             owner=unavailable waiters=1 SceNpManagerCallback
+        state: producer_size=0x00000058 expected_producer_size=0x00000058 producer_word_0x30=0x00000000 buffer_size=0x00001000 free_size=0x00001000 send_wait_threads=0x00000000 receive_wait_threads=0x00000001 serialized_waiter_count=0x00000001 footer_words=[7, 0, 12]
+    0x40010485 message-pipe             owner=unavailable waiters=1 SceNpImpsContext
+        state: producer_size=0x00000058 expected_producer_size=0x00000058 producer_word_0x30=0x00000000 buffer_size=0x00002000 free_size=0x00002000 send_wait_threads=0x00000000 receive_wait_threads=0x00000001 serialized_waiter_count=0x00000001 footer_words=[7, 0, 52]
+    Wait edges / cycles        : 40 / 0
+        thread 0x4001018d -> semaphore 0x40010189 SceShellCronCallback -> owner unavailable
+        thread 0x400102cb -> semaphore 0x400102c9 SceShellSvcServerDC -> owner unavailable
+        thread 0x40010329 -> semaphore 0x40010327 SceDbUtilDcnServerDC -> owner unavailable
+        thread 0x40020377 -> semaphore 0x40020375 ScePafJobThread -> owner unavailable
+        thread 0x4002038f -> semaphore 0x40020391 SceNpScoreServerDC -> owner unavailable
+        thread 0x4003030f -> semaphore 0x400203f5 SceNpTusServerDC -> owner unavailable
+        thread 0x4001040d -> semaphore 0x4001040b SceNpManagerServerDC -> owner unavailable
+        thread 0x40010457 -> semaphore 0x40010455 SceNpImpsUtilServerDC -> owner unavailable
+        thread 0x40030519 -> semaphore 0x40030517 ScePafJobThread -> owner unavailable
+        thread 0x40010553 -> semaphore 0x40010551 SceNpTrophyServerDC -> owner unavailable
+        thread 0x4001055d -> semaphore 0x4001055b SceNpPartyUtilServerDC -> owner unavailable
+        thread 0x40010567 -> semaphore 0x40010569 ScePafJobThread -> owner unavailable
+        thread 0x4001057d -> semaphore 0x4001057b SceNpSnsFbServerDC -> owner unavailable
+        thread 0x4001058d -> semaphore 0x4001058b SceNpCommerce2SM -> owner unavailable
+        thread 0x400105b9 -> semaphore 0x400105b7 SceNpServiceServerDC -> owner unavailable
+        thread 0x4002051b -> semaphore 0x400205e5 ScePafJobThread -> owner unavailable
+        thread 0x400205e7 -> semaphore 0x400205f1 ScePafJobThread -> owner unavailable
+        thread 0x40010615 -> semaphore 0x40010613 SceScreenShotServerDC -> owner unavailable
+        thread 0x40010617 -> semaphore 0x40010625 SceImeServiceServerDC -> owner unavailable
+        thread 0x40010209 -> event-flag 0x40010207 SceWaveMainEvf -> owner unavailable
+        thread 0x4001035b -> event-flag 0x4001033d SceDbUtilDcn00041b95EVF0100 -> owner unavailable
+        thread 0x400103af -> event-flag 0x400103ad SceNetCtlInet -> owner unavailable
+        thread 0x400103b3 -> event-flag 0x400103b1 SceNetCtlAdhoc -> owner unavailable
+        thread 0x400103cb -> event-flag 0x400103c9 SceNetUpnp -> owner unavailable
+        thread 0x40010429 -> condition-variable 0x40030369 SceNpManager -> owner unavailable
+        thread 0x40010419 -> condition-variable 0x40010417 SceNetCallout -> owner unavailable
+        thread 0x400105bb -> condition-variable 0x4001047d SceNpPushCtlCmdQueue -> owner unavailable
+        thread 0x400101cf -> lightweight-condition-variable 0x400101c7 ScePafTextQueueCond -> owner unavailable
+        thread 0x40010005 -> lightweight-condition-variable 0x400101eb ScePafDisplaySurfaceCond -> owner unavailable
+        thread 0x40010403 -> lightweight-condition-variable 0x40010401 SceNpManagerServerJob -> owner unavailable
+        thread 0x40010441 -> lightweight-condition-variable 0x40010445 SceNpImpsSvcContextManagerCond -> owner unavailable
+        thread 0x4001045f -> lightweight-condition-variable 0x40010465 SceNpImpsUtilMPStateCMtx -> owner unavailable
+        thread 0x40010549 -> lightweight-condition-variable 0x40010547 SceNpTrophyWorkQueue -> owner unavailable
+        thread 0x40010565 -> lightweight-condition-variable 0x40010563 SceNpPartyVSHNewIndicator -> owner unavailable
+        thread 0x40010573 -> lightweight-condition-variable 0x40010571 SceNpSnsFbServerJob -> owner unavailable
+        thread 0x400105c5 -> lightweight-condition-variable 0x400105c9 SceLsdbActQueueEmpty -> owner unavailable
+        thread 0x400105d5 -> lightweight-condition-variable 0x400105d9 SceLsdbActNetQueueEmpty -> owner unavailable
+        thread 0x40010637 -> lightweight-condition-variable 0x4001063b SceShellPlaylogFileAccessThread -> owner unavailable
+        thread 0x4003036f -> message-pipe 0x40030373 SceNpManagerCallback -> owner unavailable
+        thread 0x4001042d -> message-pipe 0x40010485 SceNpImpsContext -> owner unavailable
+    table SEMAPHORE_INFO       87/87 complete trailing=0x28
+    table EVENTFLAG_INFO       41/41 complete trailing=0x28
+    table MUTEX_INFO           62/62 complete trailing=0x28
+    table LWMUTEX_INFO         223/223 complete trailing=0x28
+    table CONDVAR_INFO         5/5 complete trailing=0x28
+    table LWCONDVAR_INFO       17/17 complete trailing=0x28
+    table MESG_PIPE_INFO       60/60 complete trailing=0x28
+
+TTY_LOG_EVIDENCE:
+    TTY_INFO lines             : 0; complete=True
+    TTY_INFO2 lines            : 70; complete=True
+        [PFE] selfdisable: own config.txt line commented out for next boot
+        [PFE] config: bytes parsed 0x00000051
+        [PFE] config: probe_only=off
+        [PFE] config: bench=on
+        [PFE] config: l1_prefetch=off
+        [PFE] config: l2_prefetch=off
+        [PFE] config: actlr_alloc_one_way=keep
+        [Shell]: vsh/release_branches/release_03.600 r142469 (build#753885)
+        [MTP DEVICE:mtpDevStart(163)err] unable to connect interface with MTP device=0x80543601
+        [MTP CORE:mtpCoreStart(406)err] unable to start mtp device 0x80540008
+        mtpWrapperInitialize(156) Error: sceMtpStart failed: 0x80540008
+        [MTP SERVER] Error finalizeServer(369): invalid state: 0
+    TTY timestamps and order are producer log evidence, not necessarily the exact exception time.
+
+FAILURE_IDENTITY:
+    Process name               : SceShell
+    Process ID                 : 0x00041b95
+    Thread                     : ScePafJobDefault (0x400201bf)
+    PC                         : 0x00000000
+    Fault address              : 0x00000000
+    Failure bucket             : PREFETCH_ABORT|pc:0x00000000|stop:0x30003|fs:07|access:execute
+    Failure hash               : 4216d8b663a5e442e0f34aa0d49b0be7f70a6271271f2e01ccbbc05df112b59b
+
+FOLLOWUP_COMMANDS:
+    psp2-core-parse thread psp2core-SceShell.spsp2dmp crash
+    psp2-core-parse backtrace psp2core-SceShell.spsp2dmp crash --image MODULE=DECRYPTED.elf
+    psp2-core-parse address psp2core-SceShell.spsp2dmp 0x00000000 --image MODULE=DECRYPTED.elf
+    psp2-core-parse disasm psp2core-SceShell.spsp2dmp 0x00000000 --image MODULE=DECRYPTED.elf
+    psp2-core-parse libraries psp2core-SceShell.spsp2dmp --address ADDRESS
+    psp2-core-parse notes psp2core-SceShell.spsp2dmp NOTE_NAME --json
