@@ -8,11 +8,29 @@ prefetch-related register field has its own key in a plain INI config file,
 so you never need to rebuild anything.
 
 ```ini
-enable = on                  # off | on | once
-actlr.l2_prefetch_hint = on  # Cortex-A9 ACTLR bit 1
-pl310.data_prefetch = on     # PL310 PREFETCH_CTRL bit 28
-pl310.prefetch_offset = 15   # PL310 PREFETCH_CTRL bits 4:0
+enable = on                        # off | on | once
+probe = off                        # off | once
+benchmark = off                    # off | once
+log = on                           # on | off
+
+actlr.l2_prefetch_hint = on        # ACTLR bit 1
+actlr.l1_dside_prefetch = keep     # ACTLR bit 2
+actlr.write_full_zeros = keep      # ACTLR bit 3
+actlr.alloc_one_way = keep         # ACTLR bit 8
+
+pl310.data_prefetch = on           # PREFETCH_CTRL bit 28
+pl310.prefetch_offset = 15         # PREFETCH_CTRL bits 4:0
+pl310.instr_prefetch = keep        # PREFETCH_CTRL bit 29
+pl310.prefetch_drop = keep         # PREFETCH_CTRL bit 24
+pl310.double_linefill = keep       # PREFETCH_CTRL bit 30, DO NOT ENABLE
+pl310.incr_double_linefill = keep  # PREFETCH_CTRL bit 23
+
+benchmark.clocks = max             # max | keep
+benchmark.timing = boot            # boot | home
 ```
+
+This is the shipped [`cpu_tweaks.ini`](cpu_tweaks.ini), where each key is
+documented in full right above it.
 
 ## Performance
 
