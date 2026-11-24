@@ -52,6 +52,7 @@
 #define SPL_CFK_LV0SMALL
 #define SPL_CFK_TZSFULL
 #include "libspl-cfk.h"
+#include "config.h"
 
 #define LOG(...) ksceDebugPrintf("[PFE] " __VA_ARGS__)
 
@@ -266,38 +267,6 @@ static void log_hex_line(const char *prefix, unsigned int v)
     log_line(buf);
 }
 
-/* Trims leading/trailing spaces, tabs, and a trailing '\r' from [*s,*len). */
-static void trim(const char **s, int *len)
-{
-    while (*len > 0 && (**s == ' ' || **s == '\t')) { (*s)++; (*len)--; }
-    while (*len > 0 && ((*s)[*len - 1] == ' ' || (*s)[*len - 1] == '\t' ||
-                        (*s)[*len - 1] == '\r')) (*len)--;
-}
-
-static int streq_ci(const char *a, int alen, const char *b)
-{
-    int blen = 0;
-    while (b[blen]) blen++;
-    if (alen != blen) return 0;
-    for (int i = 0; i < alen; i++) {
-        char ca = a[i], cb = b[i];
-        if (ca >= 'A' && ca <= 'Z') ca = (char)(ca - 'A' + 'a');
-        if (cb >= 'A' && cb <= 'Z') cb = (char)(cb - 'A' + 'a');
-        if (ca != cb) return 0;
-    }
-    return 1;
-}
-
-static int contains_n(const char *hay, int haylen, const char *needle)
-{
-    for (int i = 0; i < haylen; i++) {
-        int j = 0;
-        while (needle[j] && i + j < haylen && hay[i + j] == needle[j]) j++;
-        if (needle[j] == '\0') return 1;
-    }
-    return 0;
-}
-
 /*
  * Dead-man's switch: comments out this plugin's own line(s) in
  * ur0:tai/config.txt before module_start() does anything else. taiHEN only
@@ -341,32 +310,12 @@ static int self_disable_in_config(const char **reason)
         return 0;
     }
 
-    int found = 0;
-    int pos = 0;
-    while (pos < n) {
-        int start = pos;
-        while (pos < n && cfg[pos] != '\n') pos++;
-        int line_end = pos;
-
-        const char *tl = cfg + start;
-        int tlen = line_end - start;
-        trim(&tl, &tlen);
-
-        if (tlen > 0 && tl[0] != '#' && contains_n(tl, tlen, SELF_SKPRX_NEEDLE)) {
-            if (n >= (int)sizeof(cfg) - 1) {
-                *reason = "no room to insert '#'";
-                return 0;
-            }
-            for (int i = n; i > start; i--) cfg[i] = cfg[i - 1];
-            cfg[start] = '#';
-            n++;
-            pos++; /* re-sync: this line's '\n'/EOF just shifted right by 1 */
-            found = 1;
-        }
-        pos++; /* skip the '\n' itself (or step past EOF on the last line) */
+    int hits = pfe_comment_out_lines(cfg, &n, (int)sizeof(cfg), SELF_SKPRX_NEEDLE);
+    if (hits < 0) {
+        *reason = "no room to insert '#'";
+        return 0;
     }
-
-    if (!found) {
+    if (hits == 0) {
         *reason = "own line not found";
         return 0;
     }
@@ -387,65 +336,59 @@ static int self_disable_in_config(const char **reason)
     return 1;
 }
 
-/* Reads CONFIG_PATH and decides which sites to enable. Any failure to open
+/*
+ * Reads CONFIG_PATH and decides which sites to enable. Any failure to open
  * the file, or any line that isn't a recognized "key=value", leaves that
- * key's flag at its "off" default. */
+ * key's flag at its "off" default - a malformed config can never turn
+ * something on. Line-ending and BOM handling live in pfe_parse_config().
+ *
+ * The buffer is deliberately much larger than any sane config, and the file
+ * is stat'd first so that a file which does not fit is reported rather than
+ * silently truncated. A truncating read is a nasty failure mode here: the
+ * keys usually sit *after* the explanatory comments, so a too-small buffer
+ * parses nothing but comments and the plugin cleanly does nothing at all,
+ * which reads as "the plugin is broken" rather than "fix your config".
+ */
 static void read_config(int *want_l1, int *want_l2, int *probe_only)
 {
     *want_l1 = 0;
     *want_l2 = 0;
     *probe_only = 0;
 
+    static char buf[4096];
+
+    SceIoStat st;
+    memset(&st, 0, sizeof(st));
+    if (ksceIoGetstat(CONFIG_PATH, &st) >= 0 &&
+        st.st_size > (SceOff)sizeof(buf)) {
+        log_line("config: FILE TOO LARGE - not parsed, nothing will be enabled");
+        log_hex_line("config: size ", (unsigned int)st.st_size);
+        log_hex_line("config: buffer ", (unsigned int)sizeof(buf));
+        return;
+    }
+
     SceUID fd = ksceIoOpen(CONFIG_PATH, SCE_O_RDONLY, 0);
     if (fd < 0) {
         log_hex_line("config: open failed ", (unsigned int)fd);
         return;
     }
-    char buf[256];
-    memset(buf, 0, sizeof(buf));
-    int n = ksceIoRead(fd, buf, sizeof(buf) - 1);
+    int n = ksceIoRead(fd, buf, sizeof(buf));
     ksceIoClose(fd);
     if (n <= 0) {
         log_line("config: empty file");
         return;
     }
 
-    int pos = 0;
-    while (pos < n) {
-        int start = pos;
-        while (pos < n && buf[pos] != '\n') pos++;
-        const char *line = buf + start;
-        int len = pos - start;
-        pos++; /* skip the '\n' (or step past EOF on the last line) */
+    struct pfe_config c;
+    pfe_parse_config(buf, n, &c);
+    *want_l1    = c.want_l1;
+    *want_l2    = c.want_l2;
+    *probe_only = c.probe_only;
 
-        trim(&line, &len);
-        if (len == 0 || line[0] == '#') continue;
-
-        int eq = -1;
-        for (int i = 0; i < len; i++) {
-            if (line[i] == '=') { eq = i; break; }
-        }
-        if (eq < 0) continue;
-
-        const char *key = line;
-        int keylen = eq;
-        trim(&key, &keylen);
-        const char *val = line + eq + 1;
-        int vallen = len - eq - 1;
-        trim(&val, &vallen);
-
-        int on = streq_ci(val, vallen, "on");
-        if (streq_ci(key, keylen, "l1_prefetch")) {
-            *want_l1 = on;
-            log_line(on ? "config: l1_prefetch=on" : "config: l1_prefetch=off");
-        } else if (streq_ci(key, keylen, "l2_prefetch")) {
-            *want_l2 = on;
-            log_line(on ? "config: l2_prefetch=on" : "config: l2_prefetch=off");
-        } else if (streq_ci(key, keylen, "probe_only")) {
-            *probe_only = on;
-            log_line(on ? "config: probe_only=on" : "config: probe_only=off");
-        }
-    }
+    log_hex_line("config: bytes parsed ", (unsigned int)n);
+    log_line(c.probe_only ? "config: probe_only=on"  : "config: probe_only=off");
+    log_line(c.want_l1    ? "config: l1_prefetch=on" : "config: l1_prefetch=off");
+    log_line(c.want_l2    ? "config: l2_prefetch=on" : "config: l2_prefetch=off");
 }
 
 /*
