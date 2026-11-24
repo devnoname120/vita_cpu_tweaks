@@ -55,6 +55,7 @@ struct pfe_config {
     int pl310[PFE_PL310_NFIELDS];     /* enum pfe_tri, same order as pfe_pl310_fields */
     int pl310_offset;                 /* -1 = keep, else 0-7, 15, 23 or 31 */
     int bench_clocks_max;             /* bench.clocks: 1 = max (default), 0 = keep */
+    int bench_at_boot;                /* bench.timing: 1 = boot, 0 = home (default) */
     int ignored;                      /* lines with an unknown key or bad value */
 };
 
@@ -105,6 +106,15 @@ void pfe_parse_config(const char *buf, int n, struct pfe_config *out);
  * the total capacity of `buf`. Returns the number of lines commented out, or
  * -1 if there was not enough room, in which case `buf` is left untouched.
  */
+/*
+ * Rewrites every active `mode = bench` line in buf to `mode = off`, in place,
+ * keeping spacing, case of the key, line endings and any trailing comment.
+ * The value shrinks by two bytes, so *io_n only ever goes down. Returns the
+ * number of lines changed. Used so a bench run disables itself before it
+ * starts, and the reboot that follows it boots normally.
+ */
+int pfe_config_disable_bench(char *buf, int *io_n);
+
 int pfe_comment_out_lines(char *buf, int *io_n, int cap, const char *needle);
 
 #endif /* PFE_CONFIG_H */

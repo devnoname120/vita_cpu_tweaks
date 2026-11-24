@@ -62,18 +62,22 @@ sleep."
 ## Why bother
 
 Measured on the retail unit itself with the plugin's built-in benchmark
-(`mode = bench`): independent strided loads over memory that is in no cache,
-CPU at 500 MHz with bus 222 / crossbar 166 MHz (the clocks games use),
-three interleaved rounds, best two of three agreeing to a median of 0.2%.
-Cycles per load:
+(`mode = bench`, `bench.timing = boot`): independent strided loads over
+memory that is in no cache, CPU at 500 MHz with bus 222 / GPU 222 /
+crossbar 166 MHz (the clocks games use), run during boot on a near-idle
+system, three interleaved rounds. Two separate boots agree to a median of
+0.05%. Cycles per load:
 
 | stride (bytes) | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 |
 |---|---|---|---|---|---|---|---|---|
-| stock | 17.9 | 32.0 | 38.2 | 49.6 | 49.5 | 49.2 | 50.0 | 51.4 |
-| ACTLR hint only | 10.3 | 19.0 | 21.9 | 37.9 | 38.3 | 39.9 | 41.9 | 46.2 |
-| PL310 only, offset 15 | 7.3 | 11.5 | 15.3 | 21.6 | 21.4 | 28.2 | 36.7 | 44.9 |
-| **hint + PL310 offset 15** | **6.7** | **10.3** | **15.4** | **22.9** | **24.3** | **28.3** | **37.2** | **41.4** |
-| change vs stock | −63% | −68% | −60% | −54% | −51% | −42% | −26% | −19% |
+| stock | 16.6 | 29.6 | 35.0 | 47.4 | 47.4 | 47.6 | 48.0 | 49.4 |
+| ACTLR hint only | 9.9 | 18.0 | 21.1 | 37.0 | 37.5 | 38.9 | 40.7 | 44.4 |
+| PL310 only, offset 15 | 7.2 | 11.0 | 14.1 | 20.7 | 20.4 | 27.7 | 36.1 | 44.9 |
+| **hint + PL310 offset 15** | **6.6** | **10.0** | **14.0** | **22.7** | **23.3** | **27.7** | **36.6** | **41.0** |
+| change vs stock | −60% | −66% | −60% | −52% | −51% | −42% | −24% | −17% |
+
+Random (pointer-chasing) access over 2 MiB, which can't be prefetched, still
+gains a little: 33.8 → 31.3 cycles per load (−7%).
 
 Takeaways:
 - **ACTLR bit 1 ("L2 prefetch hint") is the only ACTLR bit that matters.**
@@ -85,8 +89,8 @@ Takeaways:
   strides, 31 better above 128; 15 is the best all-rounder.
 - ACTLR "allocate in one way only" and PL310 prefetch drop make no
   measurable difference either way.
-- Cache hits are unchanged (L1 4 cycles, L2 ~21–25). This won't move the
-  needle on pointer-chasing workloads (object graphs, VM dispatch,
+- Cache hits are unchanged (L1 4 cycles, L2 ~21–25). Beyond that small
+  random-access gain, this won't move the needle on pointer-chasing workloads (object graphs, VM dispatch,
   tree/BSP traversal) — it helps roughly sequential or strided access
   (streaming decode, copies, linear scans).
 

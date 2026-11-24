@@ -72,13 +72,15 @@ than running without that safety net.
    four times, `actlr: requested bits APPLIED on all cores`,
    `prefetch_ctrl before 0x21000000` / `after 0x3100000F` and
    `pl310: requested fields APPLIED`.
-3. **`mode = bench`**. Boots normally; 30 seconds after boot it raises the
-   clocks to game levels (CPU 500 MHz) and runs a memory benchmark across
-   the prefetch settings for about 40 seconds, then puts the firmware's
-   settings and clocks back. Leave the Vita on the home screen for two
-   minutes, then send the log - it ends with `bench done`. This tells us
-   whether the speed-up holds on your unit too. 500 MHz needs a clock
-   plugin such as PSVshell; without one it runs at 444 and says so.
+3. **`mode = bench`**. First switches its own config line back to
+   `mode = off`. Then, 30 seconds after boot, it raises the clocks to game
+   levels (CPU 500 MHz), runs a memory benchmark across the prefetch
+   settings for about 40 seconds, puts the firmware's settings and clocks
+   back, and reboots the console. Leave the Vita alone for two minutes
+   until it has rebooted, then send `ur0:data/prefetch_enabler_bench.log`
+   - it ends with `bench done`. This tells us whether the speed-up holds on
+   your unit too. 500 MHz needs a clock plugin such as PSVshell; without
+   one it runs at 444 and says so.
 
 Every step is gated: if anything about your layout doesn't match what the
 code expects, it logs a reason and aborts instead of guessing. An abort is

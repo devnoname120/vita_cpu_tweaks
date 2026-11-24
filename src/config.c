@@ -145,6 +145,10 @@ static void apply_key(struct pfe_config *out, const char *key, int keylen,
         int v = parse_small_uint(val, vallen);
         if (pfe_l2_offset_valid(v)) out->pl310_offset = v;
         else out->ignored++;
+    } else if (streq_ci(key, keylen, "bench.timing")) {
+        if      (streq_ci(val, vallen, "boot")) out->bench_at_boot = 1;
+        else if (streq_ci(val, vallen, "home")) out->bench_at_boot = 0;
+        else out->ignored++;
     } else if (streq_ci(key, keylen, "bench.clocks")) {
         if      (streq_ci(val, vallen, "max"))  out->bench_clocks_max = 1;
         else if (streq_ci(val, vallen, "keep")) out->bench_clocks_max = 0;
@@ -162,6 +166,7 @@ void pfe_parse_config(const char *buf, int n, struct pfe_config *out)
     for (int i = 0; i < PFE_PL310_NFIELDS; i++) out->pl310[i] = PFE_KEEP;
     out->pl310_offset = -1;
     out->bench_clocks_max = 1;
+    out->bench_at_boot = 0;
     out->ignored = 0;
 
     if (!buf || n <= 0) return;
@@ -210,6 +215,46 @@ void pfe_config_masks(const struct pfe_config *cfg, struct pfe_masks *m)
         m->pl310_clear |= PFE_PL310_OFFSET_MASK;
         m->pl310_set   |= (unsigned int)cfg->pl310_offset & PFE_PL310_OFFSET_MASK;
     }
+}
+
+int pfe_config_disable_bench(char *buf, int *io_n)
+{
+    if (!buf || !io_n || *io_n <= 0) return 0;
+    int n = *io_n, changed = 0;
+    int pos = skip_bom(buf, n), start = 0, len = 0;
+
+    while (next_line(buf, n, &pos, &start, &len)) {
+        const char *line = buf + start;
+        int l = len;
+        trim(&line, &l);
+        if (l == 0 || line[0] == '#') continue;
+
+        int eq = -1;
+        for (int i = 0; i < l; i++) if (line[i] == '=') { eq = i; break; }
+        if (eq < 0) continue;
+
+        const char *key = line;
+        int keylen = eq;
+        trim(&key, &keylen);
+        if (!streq_ci(key, keylen, "mode")) continue;
+
+        const char *val = line + eq + 1;
+        int vallen = l - eq - 1;
+        trim(&val, &vallen);
+        for (int i = 0; i < vallen; i++)
+            if (val[i] == '#') { vallen = i; trim(&val, &vallen); break; }
+        if (!streq_ci(val, vallen, "bench")) continue;
+
+        /* "bench" (5) -> "off" (3): overwrite, then close the 2-byte gap. */
+        int at = (int)(val - buf);
+        buf[at] = 'o'; buf[at + 1] = 'f'; buf[at + 2] = 'f';
+        for (int i = at + 5; i < n; i++) buf[i - 2] = buf[i];
+        n -= 2;
+        pos -= 2;               /* the line we just shortened ends 2 earlier */
+        changed++;
+    }
+    *io_n = n;
+    return changed;
 }
 
 int pfe_comment_out_lines(char *buf, int *io_n, int cap, const char *needle)

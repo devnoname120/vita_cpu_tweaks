@@ -273,6 +273,29 @@ That splits the two knobs:
   * Absolute numbers are higher in cycles than at ~330 MHz (boots 33-35)
     because DRAM latency is fixed in nanoseconds; the ranking is the same.
 
+* **Bench at boot, then self-disable and reboot (boots 43-44).** Holding
+  boot only costs a SceShell crash *after* the suite has finished and
+  written its log (boots 33-34), so `bench.timing = boot` runs it inside
+  `module_start` on a near-idle system. To keep that from ever crashing or
+  repeating, a bench run now (1) rewrites its own config line to
+  `mode = off` in place and re-reads the file to confirm, refusing to run
+  otherwise - with `self_disable = no` an unconfirmed switch could become a
+  reboot loop; (2) saves its log to `ur0:data/prefetch_enabler_bench.log`,
+  which normal boots never overwrite; (3) ends with a cold reboot through
+  `kscePowerRequestColdReset`, looked up at runtime with taiHEN's
+  `module_get_export_func` rather than imported, after boot 38 showed the
+  3.60 db lists exports the kernel does not have. Boot 44: config switched
+  (CRLF kept), suite ran, reset found and requested, console came back to
+  a normal home screen with no crash dump.
+
+  Boot-time data (`captures/boot43_bench500_boot_table.txt`,
+  `boot44_bench500_boot_table.txt`) is the cleanest so far: boots 43 and 44
+  agree to a median 0.05% (90th percentile 0.7%). Strides read 3-8% fewer
+  cycles than at the home screen (less DRAM contention), same ranking. The
+  2 MiB random chase, unusable at the home screen, is now stable: 33.8
+  cycles stock, 31.3 with hint + PL310 offset 15 (-7%), 30.0 with offset 0.
+  The GPU clock also takes at boot (222/222), unlike at the idle home screen.
+
   The rest of this bullet is the record of how the dead ends were eliminated.
 
 * **L1 / ACTLR - the dead ends, and why the devkit's technique does not port.**

@@ -66,6 +66,9 @@ void *memset(void *dst, int c, unsigned int n)
 }
 
 #define CONFIG_PATH "ur0:data/prefetch_enabler.ini"
+/* A bench run's own copy of the log. The reboot that ends a bench is followed
+ * by a normal boot, which - with self_disable=no - would overwrite LOG_PATH. */
+#define BENCH_LOG_PATH "ur0:data/prefetch_enabler_bench.log"
 #define LOG_PATH    "ur0:data/prefetch_enabler.log"
 #define HOST_LOG    "host0:prefetch_enabler/boot.log"
 
@@ -437,6 +440,7 @@ static void read_config(struct pfe_config *cfg)
         log_line(line);
     }
     log_line(cfg->bench_clocks_max ? "config: bench.clocks=max" : "config: bench.clocks=keep");
+    log_line(cfg->bench_at_boot ? "config: bench.timing=boot" : "config: bench.timing=home");
     if (cfg->ignored) {
         snprintf(line, sizeof(line),
                  "config: %d line(s) IGNORED - unknown key or bad value", cfg->ignored);
@@ -1478,6 +1482,88 @@ static void run_bench_suite(int clocks_to_max)
 
 static int g_bench_clocks_max;
 
+static void save_bench_log(void)
+{
+    SceUID fd = ksceIoOpen(BENCH_LOG_PATH, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
+    if (fd >= 0) {
+        ksceIoWrite(fd, g_log, (SceSize)g_log_len);
+        ksceIoClose(fd);
+    }
+}
+
+/*
+ * Rewrites mode = bench to mode = off in the plugin's own config, then reads
+ * the file back and checks it now parses as something other than bench.
+ * Gating, like the dead-man's switch: a bench that ends in a reboot must not
+ * be able to run again on the next boot, or self_disable=no would turn it
+ * into a reboot loop. Returns 0 only when that is confirmed.
+ */
+static int disable_bench_in_config(void)
+{
+    static char buf[PFE_CONFIG_MAX_BYTES];
+    SceUID fd = ksceIoOpen(CONFIG_PATH, SCE_O_RDONLY, 0);
+    if (fd < 0) return -1;
+    int n = ksceIoRead(fd, buf, sizeof(buf));
+    ksceIoClose(fd);
+    if (n <= 0 || n >= (int)sizeof(buf)) return -2;
+
+    int changed = pfe_config_disable_bench(buf, &n);
+    log_hex_line("bench: mode lines switched to off ", (unsigned int)changed);
+    if (changed > 0) {
+        fd = ksceIoOpen(CONFIG_PATH, SCE_O_WRONLY | SCE_O_TRUNC, 0);
+        if (fd < 0) return -3;
+        int w = ksceIoWrite(fd, buf, (SceSize)n);
+        ksceIoClose(fd);
+        if (w != n) return -4;
+    }
+
+    /* Verify from disk, not from our own buffer. */
+    fd = ksceIoOpen(CONFIG_PATH, SCE_O_RDONLY, 0);
+    if (fd < 0) return -5;
+    n = ksceIoRead(fd, buf, sizeof(buf));
+    ksceIoClose(fd);
+    struct pfe_config check;
+    pfe_parse_config(buf, n > 0 ? n : 0, &check);
+    return check.mode == PFE_MODE_BENCH ? -6 : 0;
+}
+
+/*
+ * Ends a bench run with a cold reboot, so the console comes back up normally
+ * instead of continuing with whatever the run disturbed (a boot-time run
+ * otherwise crashes the shell, boots 33-34). Resolved at runtime through
+ * taiHEN rather than imported: vita-headers' 3.60 db also lists
+ * kscePowerSetGpuClockFrequency, which turned out not to be exported (boot
+ * 38), so an export is only called once the kernel has confirmed it exists.
+ */
+extern int module_get_export_func(SceUID pid, const char *modname,
+                                  unsigned int libnid, unsigned int funcnid,
+                                  uintptr_t *func);
+#define SCE_POWER_FOR_DRIVER_NID       0x1590166Fu
+#define KSCE_POWER_REQUEST_COLD_RESET  0x0442D852u
+
+static void bench_reboot(void)
+{
+    uintptr_t fn = 0;
+    int r = module_get_export_func(0x10005 /* KERNEL_PID */, "ScePower",
+                                   SCE_POWER_FOR_DRIVER_NID,
+                                   KSCE_POWER_REQUEST_COLD_RESET, &fn);
+    log_hex_line("bench: cold reset lookup ", (unsigned int)r);
+    if (r < 0 || !fn) {
+        log_line("bench: kscePowerRequestColdReset not found - not rebooting");
+        save_bench_log();
+        flush_log_to_disk();
+        return;
+    }
+    log_line("bench: rebooting");
+    save_bench_log();
+    flush_log_to_disk();
+    int rr = ((int (*)(void))fn)();
+    /* Only reached if the request is refused or handled asynchronously. */
+    log_hex_line("bench: cold reset returned ", (unsigned int)rr);
+    save_bench_log();
+    flush_log_to_disk();
+}
+
 static int bench_main_thread(SceSize args, void *argp)
 {
     (void)args; (void)argp;
@@ -1485,7 +1571,9 @@ static int bench_main_thread(SceSize args, void *argp)
     run_bench_suite(g_bench_clocks_max);
     probe_cpu_regs();
     log_line("==== vita_prefetch_enabler bench done ====");
+    save_bench_log();
     flush_log_to_disk();
+    bench_reboot();
     return 0;
 }
 
@@ -1545,6 +1633,35 @@ int module_start(SceSize argc, const void *args)
         probe_sysmem_tail();
         probe_ddr_firewall();
         log_line("probe: skipping all EXEC_WITH_SP calls");
+        goto write_out;
+    }
+
+    if (cfg.mode == PFE_MODE_BENCH) {
+        int dr = disable_bench_in_config();
+        if (dr < 0) {
+            log_hex_line("bench: could not switch mode to off in the config, NOT running: ",
+                         (unsigned int)dr);
+            goto write_out;
+        }
+        log_line("bench: config now says mode = off for the next boot");
+        flush_log_to_disk();
+    }
+
+    if (cfg.mode == PFE_MODE_BENCH && cfg.bench_at_boot) {
+        /*
+         * bench.timing=boot: run right here, holding boot, on a near-idle
+         * system. Boots 33-34 showed the cost: the log is complete and on
+         * disk before this returns, but SceShell's MTP service then fails
+         * to start and the shell crashes - so the run ends in a reboot
+         * instead, and the config was already switched to mode = off.
+         */
+        log_line("mode=bench timing=boot: running now, holding boot");
+        run_bench_suite(cfg.bench_clocks_max);
+        probe_cpu_regs();
+        log_line("==== vita_prefetch_enabler bench done ====");
+        save_bench_log();
+        flush_log_to_disk();
+        bench_reboot();
         goto write_out;
     }
 

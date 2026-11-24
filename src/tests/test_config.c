@@ -173,6 +173,56 @@ int main(void)
     parse("bench.clocks=max\n", &c);   expect("bench.clocks max", c.bench_clocks_max, 1);
     parse("bench.clocks=500\n", &c);   expect("bench.clocks garbage => max", c.bench_clocks_max, 1);
 
+    /* --- bench.timing --- */
+    parse("", &c);                      expect("bench.timing default home", c.bench_at_boot, 0);
+    parse("bench.timing=boot\n", &c);  expect("bench.timing boot", c.bench_at_boot, 1);
+    parse("bench.timing = BOOT\r\n", &c); expect("bench.timing BOOT CRLF", c.bench_at_boot, 1);
+    parse("bench.timing=home\n", &c);  expect("bench.timing home", c.bench_at_boot, 0);
+    parse("bench.timing=now\n", &c);   expect("bench.timing garbage => home", c.bench_at_boot, 0);
+    expect("bench.timing garbage counted", ignored_of("bench.timing=now\n"), 1);
+
+    /* --- bench mode disables itself --- */
+    {
+        static const struct { const char *name, *in, *want; int ret; } t[] = {
+            { "disable: plain", "mode=bench\n", "mode=off\n", 1 },
+            { "disable: spacing and comment kept",
+              "mode = bench    # off | apply | probe | bench\r\n",
+              "mode = off    # off | apply | probe | bench\r\n", 1 },
+            { "disable: uppercase", "MODE = BENCH\n", "MODE = off\n", 1 },
+            { "disable: BOM, no newline", "\xEF\xBB\xBF" "mode=bench",
+              "\xEF\xBB\xBF" "mode=off", 1 },
+            { "disable: commented line untouched", "#mode = bench\n", "#mode = bench\n", 0 },
+            { "disable: apply untouched", "mode = apply\n", "mode = apply\n", 0 },
+            { "disable: other keys untouched",
+              "x = bench\nbench.timing = boot\nmode = bench\nbench.clocks = max\n",
+              "x = bench\nbench.timing = boot\nmode = off\nbench.clocks = max\n", 1 },
+            { "disable: two mode lines",
+              "mode=bench\r\nmode=bench\r\n", "mode=off\r\nmode=off\r\n", 2 },
+            { "disable: bare CR", "a=1\rmode=bench\rb=2\r", "a=1\rmode=off\rb=2\r", 1 },
+        };
+        for (unsigned i = 0; i < sizeof(t) / sizeof(t[0]); i++) {
+            char b[256];
+            int n = (int)strlen(t[i].in);
+            memcpy(b, t[i].in, (size_t)n);
+            int r = pfe_config_disable_bench(b, &n);
+            int ok = r == t[i].ret && n == (int)strlen(t[i].want) &&
+                     memcmp(b, t[i].want, (size_t)n) == 0;
+            if (!ok) {
+                printf("FAIL %-48s ret=%d got <%.*s>\n", t[i].name, r, n, b);
+                failures++;
+            } else {
+                printf("ok   %s\n", t[i].name);
+            }
+        }
+        /* after disabling, the parser must see mode off */
+        char b[128] = "mode = bench  # x\r\nbench.timing = boot\r\n";
+        int n = (int)strlen(b);
+        pfe_config_disable_bench(b, &n);
+        pfe_parse_config(b, n, &c);
+        expect("disable: parses as mode off afterwards", c.mode, PFE_MODE_OFF);
+        expect("disable: nothing else ignored", c.ignored, 0);
+    }
+
     /* --- unknown lines are counted, never acted on --- */
     expect("no equals counted", ignored_of("mode apply\n"), 1);
     expect("unknown key counted", ignored_of("actlr.exclusive_cache=on\n"), 1);
