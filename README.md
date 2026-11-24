@@ -106,7 +106,7 @@ The full tables, the ~330 MHz runs and the method are in
    ur0:tai/cpu_tweaks.skprx
    ```
 3. Copy [`cpu_tweaks.example.ini`](cpu_tweaks.example.ini) to
-   `ur0:data/cpu_tweaks.ini`. It ships with `enable = on` and the
+   `ur0:tai/cpu_tweaks.ini`. It ships with `enable = on` and the
    measured-best register values filled in, so they apply at every boot.
    For a first boot with a safety net, set `enable = once` instead.
 4. Reboot. `config.txt` is only read at boot, and this plugin only rereads

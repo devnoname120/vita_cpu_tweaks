@@ -24,7 +24,7 @@ works on yours.
 
 Each step below uses a `... = once` setting. The very first thing the
 plugin does with it, before touching anything else, is rewrite that line in
-its own `ur0:data/cpu_tweaks.ini` to `... = off`. So:
+its own `ur0:tai/cpu_tweaks.ini` to `... = off`. So:
 
 - Each step takes effect for **that boot only**.
 - If a boot ever hangs, just **power-cycle**: the setting already says
@@ -41,7 +41,7 @@ running without that safety net.
 ## Install
 
 1. Copy `cpu_tweaks.skprx` to `ur0:tai/`.
-2. Copy `cpu_tweaks.ini` to `ur0:data/`. It's INI-style so editors
+2. Copy `cpu_tweaks.ini` to `ur0:tai/`, next to the plugin. It's INI-style so editors
    highlight it. Editing it on Windows is fine — LF, CRLF and bare CR line
    endings all work, and a UTF-8 BOM is ignored.
 3. Add to `ur0:tai/config.txt`, under the `*KERNEL` section:
@@ -54,7 +54,7 @@ running without that safety net.
 
 ## What it does, and what else you can run
 
-`ur0:data/cpu_tweaks.ini` ships with `enable = on`: the settings below are
+`ur0:tai/cpu_tweaks.ini` ships with `enable = on`: the settings below are
 applied at every boot. After a boot, read `ur0:data/cpu_tweaks.log`.
 
 1. **`enable = on`** (as shipped). Sets the PL310 fields with one secure MMIO write, and

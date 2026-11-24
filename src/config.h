@@ -80,7 +80,7 @@ void pfe_config_masks(const struct pfe_config *cfg, struct pfe_masks *m);
 int pfe_l2_offset_valid(int v);
 
 /*
- * Parses `n` bytes of `key = value` lines from ur0:data/cpu_tweaks.ini.
+ * Parses `n` bytes of `key = value` lines from ur0:tai/cpu_tweaks.ini.
  *
  * Agnostic to line endings (LF, CRLF and bare CR all work), to a leading
  * UTF-8 BOM, to leading/trailing spaces and tabs around both key and value,

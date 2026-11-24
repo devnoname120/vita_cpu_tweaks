@@ -6,7 +6,7 @@
  * prefetchers at boot. This plugin sets the prefetch-related fields of the
  * A9's ACTLR and the PL310's PREFETCH_CTRL as its config file says:
  *
- *     ur0:data/cpu_tweaks.ini      (documented: cpu_tweaks.example.ini)
+ *     ur0:tai/cpu_tweaks.ini      (documented: cpu_tweaks.example.ini)
  *
  *     enable = off | on | once
  *     actlr.l2_prefetch_hint = on
@@ -61,7 +61,7 @@ void *memset(void *dst, int c, unsigned int n)
     return dst;
 }
 
-#define CONFIG_PATH "ur0:data/cpu_tweaks.ini"
+#define CONFIG_PATH "ur0:tai/cpu_tweaks.ini"
 /* A bench run's own copy of the log. The reboot that ends a bench is followed
  * by a normal boot, which - with the plugin enabled - would overwrite LOG_PATH. */
 #define BENCH_LOG_PATH "ur0:data/cpu_tweaks_bench.log"
