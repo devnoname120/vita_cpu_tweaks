@@ -66,11 +66,19 @@ static int next_line(const char *buf, int n, int *pos, int *start, int *len)
     return 1;
 }
 
+static int parse_tri(const char *val, int vallen)
+{
+    if (streq_ci(val, vallen, "on"))  return PFE_ON;
+    if (streq_ci(val, vallen, "off")) return PFE_OFF;
+    return PFE_KEEP;
+}
+
 void pfe_parse_config(const char *buf, int n, struct pfe_config *out)
 {
     out->want_l1 = 0;
     out->want_l2 = 0;
     out->probe_only = 0;
+    out->alloc_one_way = PFE_KEEP;
 
     if (!buf || n <= 0) return;
 
@@ -99,6 +107,8 @@ void pfe_parse_config(const char *buf, int n, struct pfe_config *out)
         if (streq_ci(key, keylen, "l1_prefetch"))      out->want_l1 = on;
         else if (streq_ci(key, keylen, "l2_prefetch")) out->want_l2 = on;
         else if (streq_ci(key, keylen, "probe_only"))  out->probe_only = on;
+        else if (streq_ci(key, keylen, "actlr_alloc_one_way"))
+            out->alloc_one_way = parse_tri(val, vallen);
     }
 }
 

@@ -27,6 +27,19 @@ static void check_cfg(const char *name, const char *text, int n,
     }
 }
 
+static void check_tri(const char *name, const char *text, int want)
+{
+    struct pfe_config c;
+    pfe_parse_config(text, (int)strlen(text), &c);
+    if (c.alloc_one_way != want) {
+        printf("FAIL %-44s alloc_one_way=%d (want %d)\n",
+               name, c.alloc_one_way, want);
+        failures++;
+    } else {
+        printf("ok   %s\n", name);
+    }
+}
+
 static void check_comment(const char *name, const char *in, const char *want,
                           int want_ret)
 {
@@ -112,6 +125,23 @@ int main(void)
             }
         }
     }
+
+    /* --- tri-state: "leave it alone" must differ from "clear it" --- */
+    check_tri("tri: absent => KEEP", "l1_prefetch=on\n", PFE_KEEP);
+    check_tri("tri: on", "actlr_alloc_one_way=on\n", PFE_ON);
+    check_tri("tri: off", "actlr_alloc_one_way=off\n", PFE_OFF);
+    check_tri("tri: OFF uppercase", "ACTLR_ALLOC_ONE_WAY=OFF\n", PFE_OFF);
+    check_tri("tri: CRLF", "actlr_alloc_one_way=off\r\n", PFE_OFF);
+    /* split: 'a' is a hex digit, so it would extend the \xBF escape */
+    check_tri("tri: BOM+CRLF", "\xEF\xBB\xBF" "actlr_alloc_one_way=off\r\n", PFE_OFF);
+    check_tri("tri: spaces", "  actlr_alloc_one_way = off  \n", PFE_OFF);
+    check_tri("tri: garbage => KEEP", "actlr_alloc_one_way=maybe\n", PFE_KEEP);
+    check_tri("tri: empty => KEEP", "actlr_alloc_one_way=\n", PFE_KEEP);
+    check_tri("tri: commented => KEEP", "#actlr_alloc_one_way=off\n", PFE_KEEP);
+    check_tri("tri: last wins",
+              "actlr_alloc_one_way=off\nactlr_alloc_one_way=on\n", PFE_ON);
+    check_tri("tri: does not match l1_prefetch key",
+              "l1_prefetch=off\n", PFE_KEEP);
 
     /* --- dead-man's switch --- */
     check_comment("switch: LF",

@@ -102,6 +102,64 @@ That splits the two knobs:
   failed `ksceKernelStartThread` is logged instead of being skipped silently.
   Boot 25's cause is still unidentified and has not recurred.
 
+* **Hardware identification (boot 31), and what it rules in and out.** A
+  read-only probe (`probe_only=on`) now reads per-core CPU registers with
+  plain non-secure `MRC`s - no SMC, so it is safe on any unit - plus the PL310
+  ID and config registers by secure read:
+
+  | register | value | meaning |
+  |---|---|---|
+  | MIDR | `0x412FC09A` | ARM Cortex-A9 **r2p10**, identical on all 4 cores |
+  | ACTLR | `0x149` | identical on all 4 cores; see below |
+  | CTR | `0x83338003` | I and D cache lines both 32 bytes |
+  | CLIDR | `0x09200003` | one visible level, separate L1 I/D (PL310 is external) |
+  | PL310 Cache ID | `0x410000C7` | part 3 = L310, **RTL release `0x07`** |
+  | PL310 AUX_CTRL | `0x60090001` | bit 29 = 1, bit 28 = 0 |
+  | PL310 PREFETCH_CTRL | `0x21000000` | bit 29 = 1, bit 28 = 0, offset `[4:0]` = 0 |
+
+  Two conclusions follow directly:
+
+  * **Double linefill must never be enabled on this hardware.** RTL release
+    `0x07` is `L310_CACHE_ID_RTL_R3P1_50REL0` in Linux's own table (`R3P2` is
+    `0x08`), and errata 752271 - double linefill can corrupt data - affects
+    r3p0, r3p1 and r3p1-50rel0, fixed only in r3p2. So the Vita's PL310 is an
+    affected part and the only workaround is leaving the feature off. This
+    kills what had looked like the most promising "fetch granularity" knob.
+  * **The AUX_CTRL / PREFETCH_CTRL aliasing is real here, not just in the
+    TRM.** AUX_CTRL bits 29/28 read `1`/`0` and PREFETCH_CTRL bits 29/28 read
+    the same, so instruction prefetch is already on and only data prefetch was
+    off. That is now confirmed on the hardware rather than assumed.
+
+  Also worth noting: `PREFETCH_CTRL[4:0]`, the L2 prefetch offset, is **0**.
+
+* **ACTLR bit 8 is set by the firmware, and clearing it works (boot 32).**
+  `0x149` decodes as FW (bit 0), write-full-line-of-zeros (3), SMP (6) and
+  **"allocate in one cache way only" (8)**. The Cortex-A9 TRM's wording for
+  bit 8 is "Enable allocation in one cache way only. For use with memory copy
+  operations to reduce cache pollution", and - the significant part - **its
+  reset value is zero**. So this is not a leftover: the boot chain sets it
+  deliberately, on every core, and it confines L1 D-cache linefill allocation
+  to one of the A9's four ways.
+
+  The stub is now generated at runtime from a set mask and a clear mask, with
+  both loaded PC-relative from literals in the same scratch page (an ARM
+  `imm12` cannot encode every mask), so arbitrary bits can be set *or cleared*.
+  Verified by disassembling the generated words before ever executing them.
+  A new tri-state config key `actlr_alloc_one_way = on|off|keep` drives it;
+  `keep` is the default, because for a bit the firmware sets, "off" has to mean
+  "actively clear" rather than "don't set".
+
+  Result with `actlr_alloc_one_way=off`: **`0x149 -> 0x04F` on all four
+  cores**, re-read a few milliseconds later from a different thread as still
+  `0x04F`, with the system booting and running normally. So the bit is
+  writable, the clear sticks, nothing re-asserts it, and it is not load-bearing
+  for boot.
+
+  **What is still unknown: whether clearing it is a performance win.** That
+  claim is unmeasured. Quantifying it needs a memory-access benchmark of the
+  kind the 3.65 devkit's `stride/` harness provided, which does not exist in
+  this repo. Do not present the AOW clear as a speed-up until it is measured.
+
   The rest of this bullet is the record of how the dead ends were eliminated.
 
 * **L1 / ACTLR - the dead ends, and why the devkit's technique does not port.**

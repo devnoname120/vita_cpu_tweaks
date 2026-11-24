@@ -6,10 +6,22 @@
 #ifndef PFE_CONFIG_H
 #define PFE_CONFIG_H
 
+/*
+ * Tri-state, for fields where "leave whatever the firmware chose" has to be
+ * distinguishable from "actively clear this". Plain on/off keys cannot express
+ * that, which matters for any bit the firmware sets rather than clears.
+ */
+enum pfe_tri {
+    PFE_KEEP = 0,   /* absent, or an unrecognised value */
+    PFE_ON   = 1,
+    PFE_OFF  = 2
+};
+
 struct pfe_config {
-    int want_l1;
-    int want_l2;
-    int probe_only;
+    int want_l1;        /* l1_prefetch:   ACTLR bits 2 and 1 */
+    int want_l2;        /* l2_prefetch:   PL310 PREFETCH_CTRL bit 28 */
+    int probe_only;     /* probe_only:    read-only recon, no secure writes */
+    int alloc_one_way;  /* actlr_alloc_one_way: ACTLR bit 8, enum pfe_tri */
 };
 
 /*
@@ -19,7 +31,8 @@ struct pfe_config {
  * UTF-8 BOM, to leading/trailing spaces and tabs around both key and value,
  * and to key/value case. Lines whose first non-blank character is '#' are
  * comments. Unrecognised keys and values are ignored, leaving that field at
- * its "off" default - so a malformed file can never turn something on.
+ * its default - "off" for the booleans, PFE_KEEP for the tri-states - so a
+ * malformed file can never turn something on or change a firmware setting.
  *
  * Every field of *out is initialised, whatever the input.
  */

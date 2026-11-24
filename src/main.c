@@ -85,6 +85,43 @@ static const unsigned int actlr_set[4] = {
     0xE12FFF1Eu,  /* BX lr */
 };
 
+/*
+ * The stub actually executed: a read-modify-write of ACTLR with arbitrary
+ * set and clear masks.
+ *
+ * The masks are loaded PC-relative from two literals in the same scratch page
+ * as the code, rather than being baked into ORR/BIC immediates - an ARM imm12
+ * is an 8-bit value with an even rotation, so it cannot encode every mask
+ * (0x106, say). The page is mapped Normal Non-Cacheable, so the literal loads
+ * and the instruction fetch both read DRAM directly and no maintenance is
+ * needed for either.
+ *
+ * For an ARM literal load the address is PC + 8 + imm12:
+ *   word 1 at +0x04 -> 0x04 + 8 + 0x10 = 0x1C (clear mask)
+ *   word 3 at +0x0C -> 0x0C + 8 + 0x0C = 0x20 (set mask)
+ */
+#define ACTLR_STUB_WORDS 9
+
+static void build_actlr_stub(unsigned int *w, unsigned int set_mask,
+                             unsigned int clear_mask)
+{
+    w[0] = 0xEE110F30u;  /* +00  MRC p15,0,r0,c1,c0,1   read ACTLR      */
+    w[1] = 0xE59F1010u;  /* +04  LDR r1,[pc,#16]        r1 = clear_mask */
+    w[2] = 0xE1C00001u;  /* +08  BIC r0,r0,r1                           */
+    w[3] = 0xE59F100Cu;  /* +0C  LDR r1,[pc,#12]        r1 = set_mask   */
+    w[4] = 0xE1800001u;  /* +10  ORR r0,r0,r1                           */
+    w[5] = 0xEE010F30u;  /* +14  MCR p15,0,r0,c1,c0,1   write ACTLR     */
+    w[6] = 0xE12FFF1Eu;  /* +18  BX lr                                  */
+    w[7] = clear_mask;   /* +1C                                         */
+    w[8] = set_mask;     /* +20                                         */
+}
+
+/* ACTLR fields this plugin touches (Cortex-A9 TRM Table 4-36). */
+#define ACTLR_L2_PREFETCH_HINT  (1u << 1)
+#define ACTLR_L1_DSIDE_PREFETCH (1u << 2)
+#define ACTLR_ALLOC_ONE_WAY     (1u << 8)
+#define ACTLR_PREFETCH_BITS     (ACTLR_L2_PREFETCH_HINT | ACTLR_L1_DSIDE_PREFETCH)
+
 extern int splCl_smc(unsigned int a0, unsigned int a1, unsigned int a2,
                      unsigned int a3, unsigned int idx);
 #define SPLTZ_SMC_EXEC_WITH_SP 0x401u
@@ -349,11 +386,9 @@ static int self_disable_in_config(const char **reason)
  * parses nothing but comments and the plugin cleanly does nothing at all,
  * which reads as "the plugin is broken" rather than "fix your config".
  */
-static void read_config(int *want_l1, int *want_l2, int *probe_only)
+static void read_config(struct pfe_config *cfg)
 {
-    *want_l1 = 0;
-    *want_l2 = 0;
-    *probe_only = 0;
+    pfe_parse_config(NULL, 0, cfg);   /* initialise every field to its default */
 
     static char buf[4096];
 
@@ -379,16 +414,15 @@ static void read_config(int *want_l1, int *want_l2, int *probe_only)
         return;
     }
 
-    struct pfe_config c;
-    pfe_parse_config(buf, n, &c);
-    *want_l1    = c.want_l1;
-    *want_l2    = c.want_l2;
-    *probe_only = c.probe_only;
+    pfe_parse_config(buf, n, cfg);
 
     log_hex_line("config: bytes parsed ", (unsigned int)n);
-    log_line(c.probe_only ? "config: probe_only=on"  : "config: probe_only=off");
-    log_line(c.want_l1    ? "config: l1_prefetch=on" : "config: l1_prefetch=off");
-    log_line(c.want_l2    ? "config: l2_prefetch=on" : "config: l2_prefetch=off");
+    log_line(cfg->probe_only ? "config: probe_only=on"  : "config: probe_only=off");
+    log_line(cfg->want_l1    ? "config: l1_prefetch=on" : "config: l1_prefetch=off");
+    log_line(cfg->want_l2    ? "config: l2_prefetch=on" : "config: l2_prefetch=off");
+    log_line(cfg->alloc_one_way == PFE_ON  ? "config: actlr_alloc_one_way=on"  :
+             cfg->alloc_one_way == PFE_OFF ? "config: actlr_alloc_one_way=off" :
+                                             "config: actlr_alloc_one_way=keep");
 }
 
 /*
@@ -438,6 +472,38 @@ static void probe_secure_layout(void)
             log_hex_line("  -> pa ", pa);
         else
             log_line("  -> SVA2PA failed");
+    }
+
+    /*
+     * PL310 identification and the registers whose contents decide which
+     * knobs are even available. Pure secure reads, no writes.
+     *
+     * Cache ID (offset 0x000) carries the part number and, in bits [5:0], the
+     * RTL release: that is what says whether double linefill is usable, since
+     * errata 752271 makes it corrupt data on r3p0/r3p1 and it is only fixed in
+     * r3p2. AUX_CTRL (0x104) aliases PREFETCH_CTRL's two prefetch-enable bits,
+     * so reading both cross-checks that the aliasing really holds here rather
+     * than only in the TRM.
+     */
+    log_line("---- probe: PL310 registers ----");
+    static const struct { unsigned int sva; const char *name; } pl310[6] = {
+        { 0x1A002000u, "probe pl310 cache_id      " },
+        { 0x1A002004u, "probe pl310 cache_type    " },
+        { 0x1A002104u, "probe pl310 aux_ctrl      " },
+        { 0x1A002108u, "probe pl310 tag_ram_lat   " },
+        { 0x1A00210Cu, "probe pl310 data_ram_lat  " },
+        { 0x1A002F60u, "probe pl310 prefetch_ctrl " },
+    };
+    for (int i = 0; i < 6; i++) {
+        unsigned int v = 0, pa = 0;
+        if (SPLx_TZS_SVA2PA(pl310[i].sva, &pa) < 0 || pa != pl310[i].sva) {
+            log_hex_line("probe: not identity-mapped, skipping ", pl310[i].sva);
+            continue;
+        }
+        if (SPLx_TZS_READ32(pl310[i].sva, &v) >= 0)
+            log_hex_line(pl310[i].name, v);
+        else
+            log_hex_line("probe: secure read failed at ", pl310[i].sva);
     }
 
     log_line("---- probe: PRINTTBR(1) ----");
@@ -563,15 +629,58 @@ static void probe_ddr_firewall(void)
  * surrounding lines alone, which is exactly the failure mode a summary
  * catches.
  */
-static int g_actlr_ok;
+/*
+ * Read-only per-core CPU identification. Plain non-secure MRCs: MIDR, ACTLR,
+ * CLIDR and CTR are all readable at PL1 without entering secure world, so
+ * this needs no SMC and runs safely in probe mode.
+ *
+ * MIDR's revision/variant is what pins down which ACTLR fields exist on this
+ * part, and reading ACTLR on every core (rather than assuming core 0 speaks
+ * for all of them) is the only way to know the firmware configured them
+ * uniformly.
+ */
+static int probe_cpu_core(SceSize args, void *argp)
+{
+    (void)args; (void)argp;
+    unsigned int mpidr = 0, midr = 0, actlr = 0, clidr = 0, ctr = 0;
+    __asm__ __volatile__("mrc p15, 0, %0, c0, c0, 5" : "=r"(mpidr));
+    __asm__ __volatile__("mrc p15, 0, %0, c0, c0, 0" : "=r"(midr));
+    __asm__ __volatile__("mrc p15, 0, %0, c1, c0, 1" : "=r"(actlr));
+    __asm__ __volatile__("mrc p15, 1, %0, c0, c0, 1" : "=r"(clidr));
+    __asm__ __volatile__("mrc p15, 0, %0, c0, c0, 1" : "=r"(ctr));
 
-#define ACTLR_PREFETCH_BITS 0x6u   /* [1] = L1 prefetch, [2] = L2 (stride) */
+    log_hex_line("  core  ", mpidr & 0xFu);
+    log_hex_line("    midr  ", midr);
+    log_hex_line("    actlr ", actlr);
+    log_hex_line("    clidr ", clidr);
+    log_hex_line("    ctr   ", ctr);
+    return 0;
+}
+
+static void probe_cpu_regs(void)
+{
+    log_line("---- probe: per-core CPU regs (read-only, no SMC) ----");
+    static const int masks[4] = { 0x10000, 0x20000, 0x40000, 0x80000 };
+    for (int i = 0; i < 4; i++) {
+        SceUID th = ksceKernelCreateThread("pfe_cpuid", probe_cpu_core,
+                                           0x10, 0x2000, 0, masks[i], NULL);
+        if (th < 0) { log_hex_line("probe: thread create failed ", (unsigned int)th); continue; }
+        int st = ksceKernelStartThread(th, 0, NULL);
+        if (st >= 0) ksceKernelWaitThreadEnd(th, NULL, NULL);
+        else log_hex_line("probe: thread start failed ", (unsigned int)st);
+        ksceKernelDeleteThread(th);
+    }
+    flush_log_to_disk();
+}
+
+static int g_actlr_ok;
 
 static int run_actlr_core(SceSize args, void *argp)
 {
     (void)args;
-    unsigned int stub_sva  = *(unsigned int *)argp;
-    unsigned int stack_sva = *((unsigned int *)argp + 1);
+    const unsigned int *a = (const unsigned int *)argp;
+    unsigned int stub_sva = a[0], stack_sva = a[1];
+    unsigned int set_mask = a[2], clear_mask = a[3];
 
     log_hex_line("  thread entered, stub ", stub_sva);
     unsigned int before = 0, after = 0, mpidr = 0;
@@ -584,7 +693,9 @@ static int run_actlr_core(SceSize args, void *argp)
     log_hex_line("  actlr before ", before);
     log_hex_line("  actlr after  ", after);
     log_hex_line("  smc ret      ", (unsigned int)r);
-    if ((after & ACTLR_PREFETCH_BITS) == ACTLR_PREFETCH_BITS) g_actlr_ok++;
+    /* The write took iff every requested bit moved the way we asked. */
+    if ((after & set_mask) == set_mask && (after & clear_mask) == 0)
+        g_actlr_ok++;
     return 0;
 }
 
@@ -802,8 +913,11 @@ static unsigned int tz_find_scratch_pa(void)
  *   - after the write, secure world must read our instructions back through
  *     the new mapping, or we never execute it.
  */
-static void apply_l1_actlr(void)
+static void apply_l1_actlr(unsigned int set_mask, unsigned int clear_mask)
 {
+    log_hex_line("actlr set mask   ", set_mask);
+    log_hex_line("actlr clear mask ", clear_mask);
+
     unsigned int text_sva = 0;
     if (SPLx_TZS_GETMODSVA(SPLTZ_MODINFO_SYSMEM, 0, 0, &text_sva) < 0) {
         log_line("l1: GETMODSVA(SYSMEM,.text) failed");
@@ -936,9 +1050,12 @@ static void apply_l1_actlr(void)
         log_line("l1: descriptor did not take - not writing the stub");
 
     /* Write the stub itself with secure writes, which the firewall permits. */
+    unsigned int stub[ACTLR_STUB_WORDS];
+    build_actlr_stub(stub, set_mask, clear_mask);
+
     if (visible) {
-        for (unsigned int i = 0; i < sizeof(actlr_set) / 4; i++) {
-            if (SPLx_TZS_WRITE32(target_sva + i * 4u, actlr_set[i]) < 0) {
+        for (unsigned int i = 0; i < ACTLR_STUB_WORDS; i++) {
+            if (SPLx_TZS_WRITE32(target_sva + i * 4u, stub[i]) < 0) {
                 log_hex_line("l1: secure stub write failed at word ", i);
                 visible = 0;
                 break;
@@ -947,9 +1064,9 @@ static void apply_l1_actlr(void)
     }
 
     if (visible) {
-        for (unsigned int i = 0; i < sizeof(actlr_set) / 4; i++) {
+        for (unsigned int i = 0; i < ACTLR_STUB_WORDS; i++) {
             unsigned int v = 0;
-            if (SPLx_TZS_READ32(target_sva + i * 4u, &v) < 0 || v != actlr_set[i]) {
+            if (SPLx_TZS_READ32(target_sva + i * 4u, &v) < 0 || v != stub[i]) {
                 log_hex_line("l1: stub not visible through new mapping, word ", i);
                 log_hex_line("     got ", v);
                 visible = 0;
@@ -966,7 +1083,8 @@ static void apply_l1_actlr(void)
             stack_sva += 0x200u;
             log_hex_line("l1 scratch sp ", stack_sva);
             static const int masks[4] = { 0x10000, 0x20000, 0x40000, 0x80000 };
-            unsigned int argp[2] = { target_sva, stack_sva };
+            unsigned int argp[4] = { target_sva, stack_sva,
+                                     set_mask, clear_mask };
             for (int i = 0; i < 4; i++) {
                 SceUID th = ksceKernelCreateThread("pfe_actlr", run_actlr_core,
                                                    0x10, 0x2000, 0, masks[i], NULL);
@@ -979,12 +1097,12 @@ static void apply_l1_actlr(void)
                 ksceKernelDeleteThread(th);
                 flush_log_to_disk();
             }
-            log_hex_line("l1 cores with prefetch bits set, of 4: ",
+            log_hex_line("l1 cores with the requested ACTLR bits, of 4: ",
                          (unsigned int)g_actlr_ok);
             if (g_actlr_ok == 4)
-                log_line("l1_prefetch: ACTLR stride prefetch ENABLED on all cores");
+                log_line("actlr: requested bits APPLIED on all cores");
             else
-                log_line("l1_prefetch: NOT fully enabled - see the per-core lines");
+                log_line("actlr: NOT fully applied - see the per-core lines");
         } else {
             log_line("l1: no INTRMGR .data for scratch sp - not executing");
         }
@@ -993,7 +1111,7 @@ static void apply_l1_actlr(void)
     }
 
     /* Zero the stub out of the scratch page, then drop the mapping again. */
-    for (unsigned int i = 0; i < sizeof(actlr_set) / 4; i++)
+    for (unsigned int i = 0; i < ACTLR_STUB_WORDS; i++)
         SPLx_TZS_WRITE32(target_sva + i * 4u, 0);
     SPLx_TZS_WRITE32(desc_sva, tgt_desc);
     log_line("l1: scratch cleared, secure mapping removed");
@@ -1016,10 +1134,26 @@ int module_start(SceSize argc, const void *args)
         goto write_out;
     }
 
-    int want_l1 = 0, want_l2 = 0, probe_only = 0;
-    read_config(&want_l1, &want_l2, &probe_only);
+    struct pfe_config cfg;
+    read_config(&cfg);
 
-    if (!want_l1 && !want_l2 && !probe_only) {
+    /*
+     * Which ACTLR bits to set and which to clear. Separating the two is what
+     * lets a bit the *firmware* set be turned back off: ACTLR bit 8
+     * (allocation in one cache way only) resets to zero per the Cortex-A9
+     * TRM, yet reads back as 1 on this hardware, so only an explicit clear
+     * can test what it costs.
+     */
+    unsigned int actlr_set_mask = 0, actlr_clear_mask = 0;
+    if (cfg.want_l1) actlr_set_mask |= ACTLR_PREFETCH_BITS;
+    if (cfg.alloc_one_way == PFE_ON)       actlr_set_mask   |= ACTLR_ALLOC_ONE_WAY;
+    else if (cfg.alloc_one_way == PFE_OFF) actlr_clear_mask |= ACTLR_ALLOC_ONE_WAY;
+
+    int want_actlr = (actlr_set_mask | actlr_clear_mask) != 0;
+    int want_l2 = cfg.want_l2;
+    int probe_only = cfg.probe_only;
+
+    if (!want_actlr && !want_l2 && !probe_only) {
         log_line("nothing to enable, exiting cleanly");
         goto write_out;
     }
@@ -1036,6 +1170,7 @@ int module_start(SceSize argc, const void *args)
     }
 
     if (probe_only) {
+        probe_cpu_regs();
         probe_secure_layout();
         probe_sysmem_tail();
         probe_ddr_firewall();
@@ -1043,8 +1178,8 @@ int module_start(SceSize argc, const void *args)
         goto write_out;
     }
 
-    if (want_l1) {
-        apply_l1_actlr();
+    if (want_actlr) {
+        apply_l1_actlr(actlr_set_mask, actlr_clear_mask);
         flush_log_to_disk();
     }
 
@@ -1091,6 +1226,15 @@ int module_start(SceSize argc, const void *args)
     l2_done:
         flush_log_to_disk();
     }
+
+    /*
+     * Final per-core read-back, after all the work is done. The per-core
+     * apply loop already reads ACTLR immediately after its own write; this
+     * re-reads it a few milliseconds later, from a different thread, so that
+     * a value which does not stick - something else in the boot re-asserting
+     * it - shows up rather than being taken on trust from the write path.
+     */
+    probe_cpu_regs();
 
     log_line("==== vita_prefetch_enabler boot done ====");
 
