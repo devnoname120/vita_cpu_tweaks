@@ -1,4 +1,7 @@
+# probe_only: read-only recon -- dump the secure layout, make no secure
+#             writes at all. Overrides the two below when on.
 # l1_prefetch: Cortex-A9 ACTLR L1 D-side prefetch + L2 prefetch hint (bits 2:1)
 # l2_prefetch: ARM PL310 L2C-310 data prefetch (PREFETCH_CTRL bit 28) -- on/off
 l1_prefetch=off
 l2_prefetch=off
+probe_only=off
