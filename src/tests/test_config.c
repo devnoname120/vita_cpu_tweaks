@@ -297,7 +297,59 @@ int main(void)
             expect("tester config: enable off as shipped", c.enable, 0);
             expect("tester config: benchmark off as shipped", c.bench, 0);
             expect("tester config: self_disable on", c.self_disable, 1);
+            expect("tester config: log on", c.log, 1);
         }
+    }
+
+    /* The tester config must offer every key the example does, with the same
+     * values apart from probe - so testers see the whole set of settings. */
+    {
+        static char ex[8192], te[8192];
+        FILE *f1 = fopen("cpu_tweaks.example.ini", "rb");
+        if (!f1) f1 = fopen("../cpu_tweaks.example.ini", "rb");
+        FILE *f2 = fopen("docs/for-testers.config.ini", "rb");
+        if (!f2) f2 = fopen("../docs/for-testers.config.ini", "rb");
+        if (!f1 || !f2) {
+            printf("FAIL %-48s cannot open configs\n", "tester vs example keys");
+            failures++;
+        } else {
+            int n1 = (int)fread(ex, 1, sizeof(ex) - 1, f1);
+            int n2 = (int)fread(te, 1, sizeof(te) - 1, f2);
+            ex[n1] = te[n2] = 0;
+            /* every "key =" line at column 0 in one file appears in the other */
+            int missing = 0;
+            for (int pass = 0; pass < 2; pass++) {
+                const char *a = pass ? te : ex, *b = pass ? ex : te;
+                for (const char *l = a; *l; ) {
+                    const char *e = strchr(l, '\n');
+                    int len = e ? (int)(e - l) : (int)strlen(l);
+                    if (len > 0 && l[0] >= 'a' && l[0] <= 'z') {
+                        int k = 0;
+                        while (k < len && l[k] != ' ' && l[k] != '=') k++;
+                        char key[64];
+                        snprintf(key, sizeof(key), "\n%.*s ", k, l);
+                        if (!strstr(b, key)) {
+                            printf("     key %s missing from %s\n", key + 1,
+                                   pass ? "example" : "tester config");
+                            missing++;
+                        }
+                    }
+                    l = e ? e + 1 : l + len;
+                }
+            }
+            expect("tester config offers every example key", missing, 0);
+            struct pfe_config ce, ct;
+            struct pfe_masks me, mt;
+            pfe_parse_config(ex, n1, &ce);
+            pfe_parse_config(te, n2, &ct);
+            pfe_config_masks(&ce, &me);
+            pfe_config_masks(&ct, &mt);
+            expect("tester config: same register values as example",
+                   me.actlr_set == mt.actlr_set && me.actlr_clear == mt.actlr_clear &&
+                   me.pl310_set == mt.pl310_set && me.pl310_clear == mt.pl310_clear, 1);
+        }
+        if (f1) fclose(f1);
+        if (f2) fclose(f2);
     }
 
     /* --- dead-man's switch --- */
