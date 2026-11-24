@@ -31,5 +31,6 @@ target_link_libraries(prefetch_enabler
   SceKernelSuspendForDriver_stub
   SceThreadmgrForDriver_stub
   SceDebugForDriver_stub
+  SceDebugForKernel_stub
 )
 vita_create_self(prefetch_enabler.skprx prefetch_enabler CONFIG ${CMAKE_SOURCE_DIR}/prefetch_enabler.yml UNSAFE)

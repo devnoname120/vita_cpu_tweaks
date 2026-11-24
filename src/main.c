@@ -41,8 +41,10 @@
 #include <psp2kern/kernel/threadmgr.h>
 #include <psp2kern/kernel/sysmem.h>
 #include <psp2kern/kernel/debug.h>
+#include <psp2kern/kernel/sysclib.h>
 #include <psp2kern/io/fcntl.h>
 #include <psp2kern/io/stat.h>
+#include <stdarg.h>
 
 #define SPL_CFK_LV0SMALL
 #define SPL_CFK_TZSFULL
@@ -137,16 +139,102 @@ static SceUID map_own_code_rx(const void *code_va, void **out_exec_va)
     return blk;
 }
 
-static char g_log[1024];
+static char g_log[32768];
 static int  g_log_len;
 
-static void log_line(const char *s)
+/* Pure buffer append, no ksceDebugPrintf call - safe to use from inside
+ * kprintf_capture_handler() below, which LOG()/log_line() are not (they'd
+ * re-enter that handler through ksceDebugPrintf forever). */
+static void append_log(const char *s)
 {
     int n = 0;
     while (s[n] && g_log_len + n < (int)sizeof(g_log) - 2) n++;
     for (int i = 0; i < n; i++) g_log[g_log_len++] = s[i];
-    g_log[g_log_len++] = '\n';
+    if (g_log_len < (int)sizeof(g_log) - 1)
+        g_log[g_log_len++] = '\n';
+}
+
+static void log_line(const char *s)
+{
+    append_log(s);
     LOG("%s\n", s);
+}
+
+static int contains(const char *hay, const char *needle)
+{
+    for (int i = 0; hay[i]; i++) {
+        int j = 0;
+        while (needle[j] && hay[i + j] == needle[j]) j++;
+        if (needle[j] == '\0') return 1;
+    }
+    return 0;
+}
+
+/* Registered as the system-wide kprintf handler only for the duration of
+ * the SPLx_CFK_INIT() call in module_start(), to capture psp2spl's own
+ * SPLi_DEBUG/SPLi_ERROR output - which otherwise only reaches
+ * ksceDebugPrintf, with nothing reading it back on a unit with no DECI4p
+ * host attached. Must call append_log(), never log_line()/LOG(). */
+static int kprintf_capture_handler(int unk, const char *format, va_list args)
+{
+    (void)unk;
+    char buf[200];
+    va_list args_copy;
+    va_copy(args_copy, args);
+    vsnprintf(buf, sizeof(buf), format, args);
+    int n = 0;
+    while (buf[n]) n++;
+    while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) buf[--n] = '\0';
+    append_log(buf);
+
+    /* SPL_TZSGMSV_EBADMOVP: psp2spl's hardcoded table offset is wrong for
+     * this firmware build, but the module's .text base (printed as this
+     * same message's 3rd arg) is already correctly resolved. Root state is
+     * still valid right here - this handler runs synchronously, nested
+     * inside the still-failing SPLx_TZS_GETMODSVA call, well before
+     * SPLx_INIT's unwind zeroes *spl_root on return. Pull the exact failing
+     * SVA straight out of this message's own args and dump a wide window
+     * around it via SVA2NSVA directly - NOT GETMODSVA, which would re-enter
+     * the same .data resolution block and recurse into the same failure. */
+    if (contains(buf, "!movp")) {
+        (void)va_arg(args_copy, const char *); /* dbgid */
+        (void)va_arg(args_copy, int);          /* mod */
+        unsigned int text_base = va_arg(args_copy, unsigned int);
+        unsigned int off       = va_arg(args_copy, unsigned int);
+        unsigned int fail_sva  = text_base + off;
+        /* A +/-0x80 window found no MOVW/MOVT pair at all, so go much
+         * wider: 4KB centered on the failing offset, packed 8 words/line
+         * to fit g_log. */
+        unsigned int win_start = (fail_sva & ~0x3Fu) - 0x800u;
+
+        void *nsva = NULL;
+        int r = SPLx_TZS_SVA2NSVA(win_start, &nsva);
+        if (r >= 0) {
+            volatile unsigned int *p = (volatile unsigned int *)nsva;
+            for (unsigned int i = 0; i < 0x1000u; i += 32) {
+                char line[96];
+                unsigned int base_off = (win_start - text_base) + i;
+                int n2 = snprintf(line, sizeof(line), "%X:", base_off);
+                for (int w = 0; w < 8; w++) {
+                    n2 += snprintf(line + n2, (size_t)(sizeof(line) - n2),
+                                   " %08X", p[(i / 4) + w]);
+                }
+                append_log(line);
+            }
+        } else {
+            char line[48];
+            snprintf(line, sizeof(line), "dump sva2nsva failed: %d", r);
+            append_log(line);
+        }
+    }
+    va_end(args_copy);
+    return 0;
+}
+
+static int kprintf_noop_handler(int unk, const char *format, va_list args)
+{
+    (void)unk; (void)format; (void)args;
+    return 0;
 }
 
 static void log_hex_line(const char *prefix, unsigned int v)
@@ -254,6 +342,12 @@ static int run_actlr_core(SceSize args, void *argp)
     unsigned int mpidr = 0;
     __asm__ __volatile__("mrc p15, 0, %0, c0, c0, 5" : "=r"(mpidr));
     LOG("actlr core%u: before=%08X after=%08X smc=%d\n", mpidr & 0xF, before, after, r);
+
+    log_hex_line("actlr core  ", mpidr & 0xFu);
+    log_hex_line("actlr before", before);
+    log_hex_line("actlr after ", after);
+    log_hex_line("actlr smc   ", (unsigned int)r);
+
     (void)args;
     return 0;
 }
@@ -274,8 +368,10 @@ int module_start(SceSize argc, const void *args)
 
     {
         SPLx_CFK_PREP(NULL, 0, "[PFE]");
+        ksceKernelRegisterKprintfHandler(kprintf_capture_handler, NULL);
         int ret = SPLx_CFK_INIT(SPL_IFL(_LV0) | SPL_IFL(_TZS), 0, 1, 1,
                                  SPLV0_COMMBACKUP_CRITICAL);
+        ksceKernelRegisterKprintfHandler(kprintf_noop_handler, NULL);
         log_hex_line("cfk_init_ret ", (unsigned int)ret);
         if (ret < 0) { log_line("CFK init failed, aborting"); goto write_out; }
     }
