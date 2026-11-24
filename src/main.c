@@ -100,6 +100,10 @@ extern int SPLx_TZS_WRITE32(unsigned int sva, unsigned int val);
  * but reached by a secure write instead of secure code execution. */
 #define PL310_PREFETCH_CTRL_SVA 0x1A002F60u
 #define PL310_DATA_PREFETCH_EN  0x10000000u
+/* PL310 maintenance-by-PA. Needed because an NS-side clean to PoC does not
+ * evict a *secure*-tagged L2 line for the same address, and the secure read
+ * path can keep hitting that stale line. Op completes when bit 0 clears. */
+#define PL310_CLEAN_INV_PA_SVA  0x1A0027F0u
 
 /* Sized for a full SPLx_TZS_PRINTTBR(1) secure page-table dump (both TTBRs,
  * L1 sections plus their L2 pages) on top of the ordinary boot log. */
@@ -503,60 +507,255 @@ static void probe_secure_layout(void)
     ksceKernelRegisterKprintfHandler(kprintf_noop_handler, NULL);
     log_hex_line("probe printtbr ret ", (unsigned int)pr);
     log_hex_line("probe log used ", (unsigned int)g_log_len);
+    flush_log_to_disk(); /* persist the dump before any later probe can die */
 }
 
 /*
- * Does ACTLR even need secure world? ACTLR is a cp15 register, and on the
- * Cortex-A9 whether its prefetch bits are writable from non-secure PL1 is a
- * firmware NSACR decision. If a plain MCR here sticks, the whole
- * EXEC_WITH_SP path is unnecessary for L1 - we just do this per core.
+ * SYSMEM's secure .text tail: the one place a stub can legally live.
  *
- * Hang-proof: pure cp15 ops in a normal kernel thread, no SMC. If the write
- * is not permitted, the A9 ignores it (read-back simply unchanged); a true
- * UNDEF would only kill this thread, not the machine, and the dead-man's
- * switch has already disabled us for the next boot regardless.
+ * Boot 9 settled that secure world has no page that is both writable and
+ * executable, and no mapping of our own code's PA - so a stub cannot be
+ * placed by allocating memory. What worked on the 3.65 devkit (2026-11-23)
+ * instead exploits that AP/XN are per-translation-table, not per-physical-
+ * page: SYSMEM's own .text is secure R-X (AP=101, no XN), its last page
+ * ends in unreferenced 0xB6 fill, and a *second, non-secure* mapping of that
+ * same physical page is plainly writable. Write the stub through the NS
+ * alias, clean/invalidate to PoU, and EXEC_WITH_SP the secure VA.
+ *
+ * Boot 9's PRINTTBR shows that region at the same addresses on retail 3.60
+ * as on the devkit: sva 0x00214000 [4K] -> pa 0x40188000, AP=101, no XN,
+ * i.e. SYSMEM .text + 0x14000 (the devkit's stub sat at +0x140CC).
+ *
+ * This dump verifies, read-only, that the tail really is fill on *this*
+ * firmware before anything writes to it - a wrong "it's probably padding"
+ * would corrupt live secure kernel code. Addresses are derived from
+ * GETMODSVA rather than hardcoded, since secure module bases move between
+ * boots.
  */
-static int probe_actlr_core(SceSize args, void *argp)
+static void probe_sysmem_tail(void)
 {
-    (void)args; (void)argp;
-    unsigned int mpidr = 0, before = 0, after = 0;
-    __asm__ __volatile__("mrc p15, 0, %0, c0, c0, 5" : "=r"(mpidr));
-    __asm__ __volatile__("mrc p15, 0, %0, c1, c0, 1" : "=r"(before));
-    unsigned int want = before | 0x6u;
-    __asm__ __volatile__("mcr p15, 0, %0, c1, c0, 1" :: "r"(want));
-    __asm__ __volatile__("isb");
-    __asm__ __volatile__("mrc p15, 0, %0, c1, c0, 1" : "=r"(after));
+    log_line("---- probe: SYSMEM .text tail (read-only) ----");
 
-    char buf[80];
+    unsigned int text_sva = 0;
+    if (SPLx_TZS_GETMODSVA(SPLTZ_MODINFO_SYSMEM, 0, 0, &text_sva) < 0) {
+        log_line("probe tail: GETMODSVA(SYSMEM,.text) failed");
+        return;
+    }
+    unsigned int tail_sva = text_sva + 0x14000u;
+    log_hex_line("probe tail sva ", tail_sva);
+
+    unsigned int tail_pa = 0;
+    if (SPLx_TZS_SVA2PA(tail_sva, &tail_pa) >= 0)
+        log_hex_line("probe tail pa  ", tail_pa);
+    else
+        log_line("probe tail: SVA2PA failed");
+
     static const char hexd[] = "0123456789ABCDEF";
-    int n = 0;
-    const char *p = "probe actlr ns core ";
-    while (*p) buf[n++] = *p++;
-    buf[n++] = hexd[mpidr & 0xF];
-    p = " before=";
-    while (*p) buf[n++] = *p++;
-    for (int s = 28; s >= 0; s -= 4) buf[n++] = hexd[(before >> s) & 0xF];
-    p = " after=";
-    while (*p) buf[n++] = *p++;
-    for (int s = 28; s >= 0; s -= 4) buf[n++] = hexd[(after >> s) & 0xF];
-    buf[n] = '\0';
-    log_line(buf);
+    for (unsigned int off = 0; off < 0x1000u; off += 32u) {
+        char line[128];
+        int n = 0;
+        for (int s = 12; s >= 0; s -= 4) line[n++] = hexd[(off >> s) & 0xF];
+        line[n++] = ':';
+        int ok = 1;
+        for (unsigned int w = 0; w < 32u; w += 4u) {
+            unsigned int v = 0;
+            if (SPLx_TZS_READ32(tail_sva + off + w, &v) < 0) { ok = 0; break; }
+            line[n++] = ' ';
+            for (int s = 28; s >= 0; s -= 4) line[n++] = hexd[(v >> s) & 0xF];
+        }
+        line[n] = '\0';
+        if (!ok) { append_log("  read32 failed, stopping tail dump"); break; }
+        append_log(line);
+    }
+    flush_log_to_disk();
+}
+
+/*
+ * Offset into SYSMEM's .text of the stub slot, inside the unreferenced 0xB6
+ * fill at the tail of its last page. Boot 12 measured the live/fill boundary
+ * on retail 3.60 at .text+0x140FC (3844 bytes of fill to the page end), so
+ * +0x14200 sits 0x104 bytes inside the fill, 32-byte aligned (one cache
+ * line for a 16-byte stub), with ~3.5 KiB of slack after it. The 3.65 devkit's
+ * boundary was +0x140CC, which is why this is checked at runtime rather than
+ * trusted: the fill contents are re-verified immediately before writing.
+ */
+#define SYSMEM_STUB_OFF 0x14200u
+
+static int run_actlr_core(SceSize args, void *argp)
+{
+    (void)args;
+    unsigned int stub_sva  = *(unsigned int *)argp;
+    unsigned int stack_sva = *((unsigned int *)argp + 1);
+
+    unsigned int before = 0, after = 0, mpidr = 0;
+    __asm__ __volatile__("mrc p15, 0, %0, c1, c0, 1" : "=r"(before));
+    int r = splCl_smc(0, stack_sva, stub_sva, 0, SPLTZ_SMC_EXEC_WITH_SP);
+    __asm__ __volatile__("mrc p15, 0, %0, c1, c0, 1" : "=r"(after));
+    __asm__ __volatile__("mrc p15, 0, %0, c0, c0, 5" : "=r"(mpidr));
+
+    log_hex_line("  core      ", mpidr & 0xFu);
+    log_hex_line("  actlr before ", before);
+    log_hex_line("  actlr after  ", after);
+    log_hex_line("  smc ret      ", (unsigned int)r);
     return 0;
 }
 
-static void probe_nonsecure_actlr(void)
+/*
+ * Sets ACTLR's prefetch bits on every core, by staging our stub in SYSMEM's
+ * secure .text fill and running it through EXEC_WITH_SP.
+ *
+ * Why this shape (see analysis/ebadmovp-investigation/README.md): secure world
+ * has no page that is both writable and executable, and no mapping of our own
+ * code's PA, so the stub cannot simply be allocated and pointed at. But AP/XN
+ * are per-translation-table, not per-physical-page: SYSMEM's .text is secure
+ * R-X, and a second *non-secure* mapping of the same physical page is writable.
+ * Write through the NS alias, clean to PoU, execute via the secure VA.
+ *
+ * Two gates keep a mistake from hanging the machine the way boot 8 did:
+ *   - the target must still be all-0xB6 fill, read back through secure world,
+ *     or we never write (protects live secure code if the layout moved);
+ *   - after writing, secure world must actually read back our instructions,
+ *     or we never execute (protects against a cache-coherency failure, which
+ *     would otherwise mean secure world executing stale 0xB6 as code).
+ * Either gate failing is a clean logged abort.
+ */
+static void apply_l1_actlr(void)
 {
-    log_line("---- probe: non-secure ACTLR write (no SMC) ----");
-    static const int masks[4] = { 0x10000, 0x20000, 0x40000, 0x80000 };
-    for (int i = 0; i < 4; i++) {
-        SceUID th = ksceKernelCreateThread("pfe_pactlr", probe_actlr_core,
-                                           0x10, 0x2000, 0, masks[i], NULL);
-        if (th < 0) { log_hex_line("probe actlr thread create failed ", (unsigned int)th); continue; }
-        if (ksceKernelStartThread(th, 0, NULL) >= 0)
-            ksceKernelWaitThreadEnd(th, NULL, NULL);
-        ksceKernelDeleteThread(th);
-        flush_log_to_disk();
+    unsigned int text_sva = 0;
+    if (SPLx_TZS_GETMODSVA(SPLTZ_MODINFO_SYSMEM, 0, 0, &text_sva) < 0) {
+        log_line("l1: GETMODSVA(SYSMEM,.text) failed");
+        return;
     }
+    unsigned int stub_sva = text_sva + SYSMEM_STUB_OFF;
+    unsigned int stub_pa  = 0;
+    if (SPLx_TZS_SVA2PA(stub_sva, &stub_pa) < 0) {
+        log_line("l1: SVA2PA(stub) failed");
+        return;
+    }
+    log_hex_line("l1 stub sva ", stub_sva);
+    log_hex_line("l1 stub pa  ", stub_pa);
+
+    /* Writable non-secure alias of the same physical page. */
+    unsigned int page_pa  = stub_pa & ~0xFFFu;
+    unsigned int page_off = stub_pa &  0xFFFu;
+    SceKernelAllocMemBlockKernelOpt opt;
+    memset(&opt, 0, sizeof(opt));
+    opt.size  = (unsigned int)sizeof(opt);
+    opt.attr  = SCE_KERNEL_ALLOC_MEMBLOCK_ATTR_HAS_PADDR;
+    opt.paddr = page_pa;
+    SceUID blk = ksceKernelAllocMemBlock("pfe_stub", SCE_KERNEL_MEMBLOCK_TYPE_KERNEL_RW,
+                                         0x1000, &opt);
+    if (blk < 0) {
+        log_hex_line("l1: NS alias map failed ", (unsigned int)blk);
+        return;
+    }
+    void *ns_base = NULL;
+    ksceKernelGetMemBlockBase(blk, &ns_base);
+    unsigned int ns_stub = (unsigned int)ns_base + page_off;
+    log_hex_line("l1 ns alias ", ns_stub);
+
+    /*
+     * Gate 1, through the NS alias rather than a secure read. Boot 14 showed
+     * the alias is a faithful view of the same physical page (it read the same
+     * 0xB6 fill), and reading it here avoids pulling the *old* bytes into the
+     * secure side's own cache moments before we overwrite them - which is what
+     * made boot 13/14's secure read-back keep returning stale fill.
+     */
+    for (unsigned int i = 0; i < sizeof(actlr_set) / 4; i++) {
+        unsigned int v = ((volatile unsigned int *)ns_stub)[i];
+        if (v != 0xB6B6B6B6u) {
+            log_hex_line("l1: stub slot is NOT fill, aborting; found ", v);
+            ksceKernelFreeMemBlock(blk);
+            return;
+        }
+    }
+    log_line("l1: stub slot verified as 0xB6 fill (via NS alias)");
+
+    for (unsigned int i = 0; i < sizeof(actlr_set) / 4; i++)
+        ((volatile unsigned int *)ns_stub)[i] = actlr_set[i];
+
+    /* Clean the D-cache for the line, then invalidate I-cache and branch
+     * predictor, so a secure-side I-fetch of the same physical line sees the
+     * new bytes. Clean to PoC as well as PoU: PL310 sits between the two, and
+     * the secure read gadget need not share our inner-cache view. 16 bytes at
+     * a 32-byte aligned slot is a single line, so one pass each. */
+    __asm__ __volatile__("mcr p15, 0, %0, c7, c11, 1" :: "r"(ns_stub)); /* DCCMVAU  -> PoU */
+    __asm__ __volatile__("dsb");
+    __asm__ __volatile__("mcr p15, 0, %0, c7, c10, 1" :: "r"(ns_stub)); /* DCCMVAC  -> PoC */
+    __asm__ __volatile__("dsb");
+    __asm__ __volatile__("mcr p15, 0, %0, c7, c14, 1" :: "r"(ns_stub)); /* DCCIMVAC -> PoC */
+    __asm__ __volatile__("dsb");
+    __asm__ __volatile__("mcr p15, 0, %0, c7, c5, 1"  :: "r"(ns_stub)); /* ICIMVAU */
+    __asm__ __volatile__("mcr p15, 0, %0, c7, c5, 6"  :: "r"(ns_stub)); /* BPIMVA  */
+    __asm__ __volatile__("dsb");
+    __asm__ __volatile__("isb");
+
+    log_hex_line("l1 ns reads after write  ", ((volatile unsigned int *)ns_stub)[0]);
+
+    /* Drop any secure-tagged PL310 line for this address, which our NS-side
+     * maintenance cannot reach. Issued through the secure write primitive
+     * since PL310 is mapped secure-RW. */
+    int pm = SPLx_TZS_WRITE32(PL310_CLEAN_INV_PA_SVA, stub_pa);
+    log_hex_line("l1 pl310 clean_inv_pa ret ", (unsigned int)pm);
+    for (int spin = 0; spin < 1000; spin++) {
+        unsigned int st = 0;
+        if (SPLx_TZS_READ32(PL310_CLEAN_INV_PA_SVA, &st) < 0) break;
+        if (!(st & 1u)) break;
+    }
+
+    /* Gate 2: secure world must see the stub, or we do not execute it. */
+    int visible = 1;
+    for (unsigned int i = 0; i < sizeof(actlr_set) / 4; i++) {
+        unsigned int v = 0;
+        if (SPLx_TZS_READ32(stub_sva + i * 4, &v) < 0 || v != actlr_set[i]) {
+            log_hex_line("l1: secure readback mismatch at word ", i);
+            log_hex_line("     got ", v);
+            visible = 0;
+            break;
+        }
+    }
+
+    if (visible) {
+        log_line("l1: stub visible from secure world, executing per core");
+        flush_log_to_disk();
+
+        /* The stub is MRC/ORR/MCR/BX lr - it touches no memory, so the sp
+         * handed to the trampoline is never dereferenced. Use INTRMGR's .data
+         * (what psp2spl itself borrows for its own init) rather than SYSMEM's,
+         * which no longer resolves now that its DATAMP is 0. */
+        unsigned int stack_sva = 0;
+        if (SPLx_TZS_GETMODSVA(SPLTZ_MODINFO_INTRMGR, 1, 0, &stack_sva) >= 0 && stack_sva) {
+            stack_sva += 0x200u;
+            log_hex_line("l1 scratch sp ", stack_sva);
+
+            static const int masks[4] = { 0x10000, 0x20000, 0x40000, 0x80000 };
+            unsigned int argp[2] = { stub_sva, stack_sva };
+            for (int i = 0; i < 4; i++) {
+                SceUID th = ksceKernelCreateThread("pfe_actlr", run_actlr_core,
+                                                   0x10, 0x2000, 0, masks[i], NULL);
+                if (th < 0) { log_hex_line("l1: thread create failed ", (unsigned int)th); continue; }
+                if (ksceKernelStartThread(th, sizeof(argp), argp) >= 0)
+                    ksceKernelWaitThreadEnd(th, NULL, NULL);
+                ksceKernelDeleteThread(th);
+                flush_log_to_disk();
+            }
+        } else {
+            log_line("l1: no INTRMGR .data for scratch sp - not executing");
+        }
+    } else {
+        log_line("l1: stub NOT visible from secure world - NOT executing (clean abort)");
+    }
+
+    /* Leave SYSMEM's .text as we found it. */
+    for (unsigned int i = 0; i < sizeof(actlr_set) / 4; i++)
+        ((volatile unsigned int *)ns_stub)[i] = 0xB6B6B6B6u;
+    __asm__ __volatile__("mcr p15, 0, %0, c7, c11, 1" :: "r"(ns_stub));
+    __asm__ __volatile__("dsb");
+    __asm__ __volatile__("mcr p15, 0, %0, c7, c5, 1"  :: "r"(ns_stub));
+    __asm__ __volatile__("dsb");
+    __asm__ __volatile__("isb");
+    ksceKernelFreeMemBlock(blk);
+    log_line("l1: fill restored, NS alias released");
 }
 
 int module_start(SceSize argc, const void *args)
@@ -597,23 +796,14 @@ int module_start(SceSize argc, const void *args)
 
     if (probe_only) {
         probe_secure_layout();
-        probe_nonsecure_actlr();
+        probe_sysmem_tail();
         log_line("probe_only: skipping all EXEC_WITH_SP calls");
         goto write_out;
     }
 
     if (want_l1) {
-        /*
-         * ACTLR is a cp15 register, settable only by an MCR run in secure
-         * PL1, per core. Boot 10 showed a non-secure PL1 MCR faults here, and
-         * EXEC_WITH_SP needs `func` mapped executable in secure world - which
-         * our own code page is not (boot 9 PRINTTBR: PA 0x4128F000 absent from
-         * the secure tables, and no secure page is both writable and
-         * executable). Until there is a mechanism to run our stub in secure
-         * world, do NOT take the old EXEC_WITH_SP path: it jumps into unmapped
-         * secure memory and hangs the machine (boot 8). Skip loudly instead.
-         */
-        log_line("l1_prefetch: ACTLR needs secure-PL1 execution, no mechanism yet - SKIPPED (see ebadmovp README)");
+        apply_l1_actlr();
+        flush_log_to_disk();
     }
 
     if (want_l2) {

@@ -49,14 +49,47 @@ That splits the two knobs:
   `PREFETCH_CTRL` (`0x1A002F60`) bit 28 with `SPLx_TZS_WRITE32`. Boot 11:
   `0x21000000 -> 0x31000000`, read-back confirms, "data prefetch ENABLED",
   clean boot. This is what the plugin now does.
-* **L1 / ACTLR - BLOCKED.** ACTLR is a cp15 register, settable only by an
-  `MCR` in secure PL1, per core. A non-secure PL1 `MCR` does not work (boot 10
-  wedged the probe thread), and `EXEC_WITH_SP` needs a secure-executable
-  `func` we have no way to supply yet. The plugin now **skips L1 loudly**
-  rather than taking the hanging path. Open options: SYSMEM's `MBALLOC`
-  secure allocator (SMC 0x402, registered but unused by the library - does it
-  return executable memory?), or a kernel_boot_loader byte-patch approach
-  entirely outside this plugin.
+* **L1 / ACTLR - BLOCKED, and the devkit's technique is ruled out on retail.**
+  ACTLR is a cp15 register, settable only by an `MCR` in secure PL1, per core.
+  A non-secure PL1 `MCR` does not work (boot 10 wedged the probe thread), so
+  it has to run in secure world via `EXEC_WITH_SP`, which needs a
+  secure-executable `func`.
+
+  The 3.65 devkit solved this (2026-11-23) by staging the stub in the
+  unreferenced `0xB6` fill at the tail of SYSMEM's own secure `.text` - that
+  page is secure R-X - writing it through a *second, non-secure* mapping of
+  the same physical page (AP/XN are per-translation-table, not
+  per-physical-page), then cleaning to PoU and executing the secure VA.
+  **That does not work on retail 3.60.** Boots 12-15, with two safety gates
+  that turned every failure into a clean logged abort rather than a hang:
+
+  * boot 12 located the live/fill boundary at `.text+0x140FC` (3844 bytes of
+    fill to the page end). Note the devkit's boundary was `+0x140CC` - the
+    address must be derived at runtime, not copied.
+  * the NS alias genuinely maps the right page: `ATTR_HAS_PADDR` is honoured
+    and the alias reads back the same `0xB6` fill (boot 14).
+  * the write lands and is visible from the NS side (`0xEE110F30`), but the
+    secure side keeps reading `0xB6B6B6B6` - after removing our own
+    self-pollution (gate 1 now reads via the NS alias, not a secure read),
+    after cleaning to both PoU and PoC, and after a successful PL310
+    clean-invalidate-by-PA (boot 15). So **NS writes into the TZ-protected
+    region never become visible to secure world on this firmware.**
+  * and there is no way around it by aliasing: `PA 0x40188000` appears
+    exactly once in the secure tables (`sva 0x00214000`, AP=101 R-X). Its
+    neighbours `0x40189000`-`0x4018F000` are writable but `XN`. Writable and
+    executable are strictly disjoint across the entire secure address space.
+
+  The plugin therefore attempts L1 and **aborts cleanly** if the stub is not
+  visible from secure world; it never executes an unverified `func`, so it
+  cannot reproduce boot 8's hang.
+
+  Remaining in-plugin option: use `SPLx_TZS_WRITE32` to temporarily flip that
+  one L2 descriptor's AP bits to PL1-RW, write the stub with secure writes,
+  restore the descriptor, with TLB maintenance either side - entirely inside
+  secure world, so none of the NS/S visibility problem applies. This is a
+  real escalation (a corrupted secure descriptor breaks secure world) and is
+  **not implemented**. Outside this plugin, the kernel_boot_loader byte-patch
+  route sidesteps the whole problem.
 
 `probe_only=on` in `ur0:data/prefetch_enabler.txt` re-runs the read-only
 PRINTTBR + non-secure-ACTLR reconnaissance without touching `EXEC_WITH_SP`.
