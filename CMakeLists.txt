@@ -30,6 +30,7 @@ target_link_libraries(prefetch_enabler
   SceSysrootForKernel_stub
   SceKernelSuspendForDriver_stub
   SceThreadmgrForDriver_stub
+  ScePowerForDriver_stub
   SceDebugForDriver_stub
   SceDebugForKernel_stub
 )

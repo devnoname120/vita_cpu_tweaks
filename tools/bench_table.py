@@ -2,6 +2,7 @@
 
 Usage: python3 tools/bench_table.py <prefetch_enabler.log>
 
+Legs that appear in several rounds are merged, keeping each test's minimum.
 Prints, per leg, cycles/access and ns/access for the chase (latency vs
 working set) and the stride walk (independent loads over uncached memory),
 plus the clock each leg ran at (cycles / microseconds).
@@ -15,13 +16,19 @@ for line in open(sys.argv[1], errors="replace"):
     if m and m.group(1) == "end":
         continue
     if m:
-        cur = {"name": m.group(1), "chase": {}, "stride": {}}
-        legs.append(cur)
+        # Legs repeat once per round; merge them by name, keeping the minimum.
+        name = m.group(1)
+        cur = next((L for L in legs if L["name"] == name), None)
+        if cur is None:
+            cur = {"name": name, "chase": {}, "stride": {}}
+            legs.append(cur)
         continue
     m = re.match(r"bench (chase|stride) ([0-9A-F]+) cyc ([0-9A-F]+) us ([0-9A-F]+) n ([0-9A-F]+)", line)
     if m and cur is not None:
         kind, p, cyc, us, n = m.group(1), *(int(x, 16) for x in m.groups()[1:])
-        cur[kind][p] = (cyc, us, n)
+        old = cur[kind].get(p)
+        if old is None or (cyc and cyc < old[0]):
+            cur[kind][p] = (cyc, us, n)
 
 def fmt_size(b):
     return f"{b >> 20}M" if b >= 1 << 20 else f"{b >> 10}K" if b >= 1024 else f"{b}"

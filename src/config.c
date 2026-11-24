@@ -66,16 +66,33 @@ static int next_line(const char *buf, int n, int *pos, int *start, int *len)
     return 1;
 }
 
+const struct pfe_field pfe_actlr_fields[PFE_ACTLR_NFIELDS] = {
+    { "actlr.l1_dside_prefetch",    PFE_ACTLR_L1_DSIDE_PREFETCH },
+    { "actlr.l2_prefetch_hint",     PFE_ACTLR_L2_PREFETCH_HINT },
+    { "actlr.write_full_zeros",     PFE_ACTLR_WRITE_FULL_ZEROS },
+    { "actlr.alloc_one_way",        PFE_ACTLR_ALLOC_ONE_WAY },
+};
+
+const struct pfe_field pfe_pl310_fields[PFE_PL310_NFIELDS] = {
+    { "pl310.data_prefetch",        PFE_PL310_DATA_PREFETCH },
+    { "pl310.instr_prefetch",       PFE_PL310_INSTR_PREFETCH },
+    { "pl310.prefetch_drop",        PFE_PL310_PREFETCH_DROP },
+    { "pl310.double_linefill",      PFE_PL310_DOUBLE_LINEFILL },
+    { "pl310.incr_double_linefill", PFE_PL310_INCR_DOUBLE_LINEFILL },
+};
+
+/* -1 for anything that is not on/off/keep, so it can be counted as ignored. */
 static int parse_tri(const char *val, int vallen)
 {
-    if (streq_ci(val, vallen, "on"))  return PFE_ON;
-    if (streq_ci(val, vallen, "off")) return PFE_OFF;
-    return PFE_KEEP;
+    if (streq_ci(val, vallen, "on"))   return PFE_ON;
+    if (streq_ci(val, vallen, "off"))  return PFE_OFF;
+    if (streq_ci(val, vallen, "keep")) return PFE_KEEP;
+    return -1;
 }
 
 int pfe_l2_offset_valid(int v)
 {
-    return (v >= 0 && v <= 7) || v == 15 || v == 31;
+    return (v >= 0 && v <= 7) || v == 15 || v == 23 || v == 31;
 }
 
 /* Decimal 0-99, nothing else; -1 if the value is not that. */
@@ -90,14 +107,62 @@ static int parse_small_uint(const char *val, int vallen)
     return v;
 }
 
+/* Sets *slot from an on/off/keep value, or counts the line as ignored. */
+static void set_tri(int *slot, const char *val, int vallen, int *ignored)
+{
+    int t = parse_tri(val, vallen);
+    if (t < 0) { (*ignored)++; return; }
+    *slot = t;
+}
+
+static void apply_key(struct pfe_config *out, const char *key, int keylen,
+                      const char *val, int vallen)
+{
+    for (int i = 0; i < PFE_ACTLR_NFIELDS; i++)
+        if (streq_ci(key, keylen, pfe_actlr_fields[i].key)) {
+            set_tri(&out->actlr[i], val, vallen, &out->ignored);
+            return;
+        }
+    for (int i = 0; i < PFE_PL310_NFIELDS; i++)
+        if (streq_ci(key, keylen, pfe_pl310_fields[i].key)) {
+            set_tri(&out->pl310[i], val, vallen, &out->ignored);
+            return;
+        }
+
+    if (streq_ci(key, keylen, "mode")) {
+        if      (streq_ci(val, vallen, "off"))   out->mode = PFE_MODE_OFF;
+        else if (streq_ci(val, vallen, "apply")) out->mode = PFE_MODE_APPLY;
+        else if (streq_ci(val, vallen, "probe")) out->mode = PFE_MODE_PROBE;
+        else if (streq_ci(val, vallen, "bench")) out->mode = PFE_MODE_BENCH;
+        else { out->mode = PFE_MODE_OFF; out->ignored++; }
+    } else if (streq_ci(key, keylen, "self_disable")) {
+        /* Only an explicit "no" turns the dead-man's switch off. */
+        if      (streq_ci(val, vallen, "no"))  out->self_disable = 0;
+        else if (streq_ci(val, vallen, "yes")) out->self_disable = 1;
+        else { out->self_disable = 1; out->ignored++; }
+    } else if (streq_ci(key, keylen, "pl310.prefetch_offset")) {
+        if (streq_ci(val, vallen, "keep")) { out->pl310_offset = -1; return; }
+        int v = parse_small_uint(val, vallen);
+        if (pfe_l2_offset_valid(v)) out->pl310_offset = v;
+        else out->ignored++;
+    } else if (streq_ci(key, keylen, "bench.clocks")) {
+        if      (streq_ci(val, vallen, "max"))  out->bench_clocks_max = 1;
+        else if (streq_ci(val, vallen, "keep")) out->bench_clocks_max = 0;
+        else out->ignored++;
+    } else {
+        out->ignored++;
+    }
+}
+
 void pfe_parse_config(const char *buf, int n, struct pfe_config *out)
 {
-    out->want_l1 = 0;
-    out->want_l2 = 0;
-    out->probe_only = 0;
-    out->alloc_one_way = PFE_KEEP;
-    out->bench = 0;
-    out->l2_offset = PFE_L2_OFFSET_DEFAULT;
+    out->mode = PFE_MODE_OFF;
+    out->self_disable = 1;
+    for (int i = 0; i < PFE_ACTLR_NFIELDS; i++) out->actlr[i] = PFE_KEEP;
+    for (int i = 0; i < PFE_PL310_NFIELDS; i++) out->pl310[i] = PFE_KEEP;
+    out->pl310_offset = -1;
+    out->bench_clocks_max = 1;
+    out->ignored = 0;
 
     if (!buf || n <= 0) return;
 
@@ -113,7 +178,7 @@ void pfe_parse_config(const char *buf, int n, struct pfe_config *out)
         for (int i = 0; i < len; i++) {
             if (line[i] == '=') { eq = i; break; }
         }
-        if (eq < 0) continue;
+        if (eq < 0) { out->ignored++; continue; }
 
         const char *key = line;
         int keylen = eq;
@@ -122,17 +187,28 @@ void pfe_parse_config(const char *buf, int n, struct pfe_config *out)
         int vallen = len - eq - 1;
         trim(&val, &vallen);
 
-        int on = streq_ci(val, vallen, "on");
-        if (streq_ci(key, keylen, "l1_prefetch"))      out->want_l1 = on;
-        else if (streq_ci(key, keylen, "l2_prefetch")) out->want_l2 = on;
-        else if (streq_ci(key, keylen, "probe_only"))  out->probe_only = on;
-        else if (streq_ci(key, keylen, "bench"))       out->bench = on;
-        else if (streq_ci(key, keylen, "l2_prefetch_offset")) {
-            int v = parse_small_uint(val, vallen);
-            out->l2_offset = pfe_l2_offset_valid(v) ? v : PFE_L2_OFFSET_DEFAULT;
-        }
-        else if (streq_ci(key, keylen, "actlr_alloc_one_way"))
-            out->alloc_one_way = parse_tri(val, vallen);
+        /* A trailing "# comment" after the value is allowed. */
+        for (int i = 0; i < vallen; i++)
+            if (val[i] == '#') { vallen = i; trim(&val, &vallen); break; }
+
+        apply_key(out, key, keylen, val, vallen);
+    }
+}
+
+void pfe_config_masks(const struct pfe_config *cfg, struct pfe_masks *m)
+{
+    m->actlr_set = m->actlr_clear = m->pl310_set = m->pl310_clear = 0;
+    for (int i = 0; i < PFE_ACTLR_NFIELDS; i++) {
+        if (cfg->actlr[i] == PFE_ON)  m->actlr_set   |= pfe_actlr_fields[i].bit;
+        if (cfg->actlr[i] == PFE_OFF) m->actlr_clear |= pfe_actlr_fields[i].bit;
+    }
+    for (int i = 0; i < PFE_PL310_NFIELDS; i++) {
+        if (cfg->pl310[i] == PFE_ON)  m->pl310_set   |= pfe_pl310_fields[i].bit;
+        if (cfg->pl310[i] == PFE_OFF) m->pl310_clear |= pfe_pl310_fields[i].bit;
+    }
+    if (cfg->pl310_offset >= 0) {
+        m->pl310_clear |= PFE_PL310_OFFSET_MASK;
+        m->pl310_set   |= (unsigned int)cfg->pl310_offset & PFE_PL310_OFFSET_MASK;
     }
 }
 

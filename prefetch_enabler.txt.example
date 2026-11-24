@@ -1,36 +1,79 @@
 # vita_prefetch_enabler -- copy to ur0:data/prefetch_enabler.txt
 #
 # Keys come first on purpose: if anything ever reads only the start of this
-# file, it still sees them. Values are "on" or anything else (= off).
-# LF, CRLF and bare CR line endings all work, as does a UTF-8 BOM.
-
-probe_only=off
-l1_prefetch=off
-l2_prefetch=off
-l2_prefetch_offset=15
-actlr_alloc_one_way=keep
-bench=off
-
-# probe_only:   read-only recon -- dump the secure page-table layout to
-#               ur0:data/prefetch_enabler.log and make NO secure writes at
-#               all. Overrides the two below when on.
-# l1_prefetch:  Cortex-A9 ACTLR L1 D-side prefetch + L2 prefetch hint
-#               (bits 2 and 1 -- note this is two separate features)
-# l2_prefetch:  ARM PL310 L2C-310 data prefetch (PREFETCH_CTRL bit 28)
-# l2_prefetch_offset:  0-7, 15 or 31 (default 15), used with l2_prefetch=on.
-#               How many lines ahead the PL310 prefetches. 15 measured best
-#               overall; at the firmware's 0, L2 prefetch is nearly useless.
-#               23 is refused (ARM errata 765569); anything invalid -> 15.
-# bench:        run a ~10 s memory benchmark 30 s after boot, logging to
-#               ur0:data/prefetch_enabler.log, then restore the firmware's
-#               settings. Ignores the keys above. For measurement only.
+# file, it still sees them. LF, CRLF and bare CR line endings all work, as
+# does a UTF-8 BOM. '#' starts a comment, also after a value.
 #
-# actlr_alloc_one_way:  on | off | keep   (tri-state, default keep)
-#               ACTLR bit 8, "allocate in one cache way only". Unlike the
-#               keys above this is a bit the *firmware* sets: the Cortex-A9
-#               TRM says it resets to 0, but this hardware boots with it at 1
-#               on all four cores, which confines L1 D-cache allocation to one
-#               of the four ways. "keep" leaves it as the firmware set it;
-#               "off" clears it. Verified writable and stable on retail 3.60,
-#               and measured to make no difference either way (all of L1
-#               stays usable) - see analysis/ebadmovp-investigation/README.md.
+# Register fields take on | off | keep. "keep" (the default for any key that
+# is absent) leaves the firmware's value alone; "off" actively clears it.
+# The values below are the measured-best settings (see the analysis README);
+# set mode = apply to use them.
+
+mode = off                          # off | apply | probe | bench
+self_disable = yes                  # yes | no
+
+actlr.l1_dside_prefetch    = on     # ACTLR bit 2     firmware: off
+actlr.l2_prefetch_hint     = on     # ACTLR bit 1     firmware: off
+actlr.write_full_zeros     = keep   # ACTLR bit 3     firmware: on
+actlr.alloc_one_way        = keep   # ACTLR bit 8     firmware: on
+
+pl310.data_prefetch        = on     # bit 28          firmware: off
+pl310.prefetch_offset      = 15     # bits 4:0        firmware: 0   (never 23)
+pl310.instr_prefetch       = keep   # bit 29          firmware: on
+pl310.prefetch_drop        = keep   # bit 24          firmware: on
+pl310.double_linefill      = keep   # bit 30          firmware: off (never on)
+pl310.incr_double_linefill = keep   # bit 23          firmware: off
+
+bench.clocks               = max    # max | keep
+
+# mode
+#   off     do nothing (but still self-disable, see below).
+#   apply   write the register fields above. The PL310 fields are secure
+#           MMIO writes; the ACTLR fields need a short stub run in secure
+#           world on each core.
+#   probe   read-only recon: logs CPU/PL310 IDs and the secure page-table
+#           layout to ur0:data/prefetch_enabler.log. NO secure writes.
+#   bench   30 s after boot, runs a memory benchmark (about a minute) across
+#           prefetch settings, logs it, then restores the firmware's values.
+#           The register fields above are ignored in this mode.
+#
+# self_disable
+#   yes     (default) the plugin comments out its own ur0:tai/config.txt line
+#           as the very first thing it does, so if a boot ever hangs, a plain
+#           power-cycle boots without it. Re-enable the line to run it again.
+#   no      stays enabled and applies the settings on every boot. Only use
+#           this once mode = apply has booted cleanly on your unit.
+#
+# actlr.*   Cortex-A9 Auxiliary Control Register, applied to all four cores.
+#   l1_dside_prefetch  the L1 data-side stride prefetcher.
+#   l2_prefetch_hint   lets the A9 send prefetch hints to the L2 controller.
+#   write_full_zeros   whole-line zero writes go straight to L2 without a
+#                      linefill. Needs PL310 AUX_CTRL bit 0, which is on.
+#   alloc_one_way      L1 allocation in one way only. Despite the name it was
+#                      measured to make no difference: all of L1 stays usable.
+#   (Exclusive L1/L2 mode, bit 7, is deliberately not offered: it must match
+#   PL310 AUX_CTRL bit 12, which is 0 and can only change with L2 disabled,
+#   so setting it would break cache coherency.)
+#
+# pl310.*   ARM PL310 L2C-310 prefetch control register.
+#   data_prefetch      L2 data prefetch. Only worth it with a non-zero
+#                      offset: at offset 0 it adds nothing over the A9's own
+#                      prefetcher and slows strides of 64 bytes and up.
+#   prefetch_offset    how many lines ahead to prefetch: 0-7, 15, 23 or 31,
+#                      or keep. 15 measured best overall; 31 is better only
+#                      for very large strides.
+#                      DO NOT USE 23: ARM errata 765569 - with offset 23 the
+#                      prefetcher can cross a 4 KB page boundary, into memory
+#                      it must not touch. This PL310 revision is affected.
+#   instr_prefetch     L2 instruction prefetch.
+#   prefetch_drop      drop prefetches the interconnect cannot take quickly.
+#   double_linefill    DO NOT ENABLE: ARM errata 752271 - double linefill can
+#                      CORRUPT DATA on r3p0-r3p1, and this unit's PL310 is
+#                      r3p1-50rel0. It is accepted only for experiments.
+#   incr_double_linefill  double linefill for incrementing bursts. Reported
+#                      to hurt read throughput elsewhere; untested here.
+#
+# bench.clocks
+#   max     (default) bench mode raises the clocks to what games use - CPU
+#           500 MHz, bus 222, GPU 222, GPU crossbar 166 - for the run, then
+#           puts them back. keep: benchmark at whatever the system is using.

@@ -12,57 +12,35 @@
 
 static int failures;
 
-static void check_cfg(const char *name, const char *text, int n,
-                      int l1, int l2, int probe)
+static void parse(const char *text, struct pfe_config *c)
 {
-    struct pfe_config c;
-    if (n < 0) n = (int)strlen(text);
-    pfe_parse_config(text, n, &c);
-    if (c.want_l1 != l1 || c.want_l2 != l2 || c.probe_only != probe) {
-        printf("FAIL %-44s l1=%d l2=%d probe=%d (want %d/%d/%d)\n",
-               name, c.want_l1, c.want_l2, c.probe_only, l1, l2, probe);
+    pfe_parse_config(text, (int)strlen(text), c);
+}
+
+static void expect(const char *name, int got, int want)
+{
+    if (got != want) {
+        printf("FAIL %-48s got %d, want %d\n", name, got, want);
         failures++;
     } else {
         printf("ok   %s\n", name);
     }
 }
 
-static void check_tri(const char *name, const char *text, int want)
+static void expect_hex(const char *name, unsigned int got, unsigned int want)
 {
-    struct pfe_config c;
-    pfe_parse_config(text, (int)strlen(text), &c);
-    if (c.alloc_one_way != want) {
-        printf("FAIL %-44s alloc_one_way=%d (want %d)\n",
-               name, c.alloc_one_way, want);
+    if (got != want) {
+        printf("FAIL %-48s got 0x%08X, want 0x%08X\n", name, got, want);
         failures++;
     } else {
         printf("ok   %s\n", name);
     }
 }
 
-static void check_bench(const char *name, const char *text, int want)
-{
-    struct pfe_config c;
-    pfe_parse_config(text, (int)strlen(text), &c);
-    if (c.bench != want) {
-        printf("FAIL %-44s bench=%d (want %d)\n", name, c.bench, want);
-        failures++;
-    } else {
-        printf("ok   %s\n", name);
-    }
-}
-
-static void check_off(const char *name, const char *text, int want)
-{
-    struct pfe_config c;
-    pfe_parse_config(text, (int)strlen(text), &c);
-    if (c.l2_offset != want) {
-        printf("FAIL %-44s l2_offset=%d (want %d)\n", name, c.l2_offset, want);
-        failures++;
-    } else {
-        printf("ok   %s\n", name);
-    }
-}
+static int mode_of(const char *t)    { struct pfe_config c; parse(t, &c); return c.mode; }
+static int ignored_of(const char *t) { struct pfe_config c; parse(t, &c); return c.ignored; }
+static int offset_of(const char *t)  { struct pfe_config c; parse(t, &c); return c.pl310_offset; }
+static int dside_of(const char *t)   { struct pfe_config c; parse(t, &c); return c.actlr[0]; }
 
 static void check_comment(const char *name, const char *in, const char *want,
                           int want_ret)
@@ -74,7 +52,7 @@ static void check_comment(const char *name, const char *in, const char *want,
                                     "prefetch_enabler.skprx");
     int wn = (int)strlen(want);
     if (ret != want_ret || n != wn || memcmp(buf, want, (size_t)wn) != 0) {
-        printf("FAIL %-44s ret=%d (want %d)\n", name, ret, want_ret);
+        printf("FAIL %-48s ret=%d (want %d)\n", name, ret, want_ret);
         printf("       got  <%.*s>\n", n, buf);
         printf("       want <%s>\n", want);
         failures++;
@@ -85,113 +63,147 @@ static void check_comment(const char *name, const char *in, const char *want,
 
 int main(void)
 {
-    /* --- line endings: the whole point of this file --- */
-    check_cfg("LF", "l1_prefetch=on\nl2_prefetch=on\n", -1, 1, 1, 0);
-    check_cfg("CRLF", "l1_prefetch=on\r\nl2_prefetch=on\r\n", -1, 1, 1, 0);
-    check_cfg("bare CR", "l1_prefetch=on\rl2_prefetch=on\r", -1, 1, 1, 0);
-    check_cfg("mixed LF/CRLF", "l1_prefetch=on\nl2_prefetch=on\r\n", -1, 1, 1, 0);
-    check_cfg("CRLF, no trailing newline",
-              "l1_prefetch=on\r\nl2_prefetch=on", -1, 1, 1, 0);
-    check_cfg("LF, no trailing newline", "l2_prefetch=on", -1, 0, 1, 0);
-    check_cfg("CRLF does not leak into the value",
-              "l1_prefetch=on\r\n", -1, 1, 0, 0);
-    check_cfg("CRLF blank lines", "\r\n\r\nl1_prefetch=on\r\n\r\n", -1, 1, 0, 0);
+    struct pfe_config c;
+    struct pfe_masks m;
 
-    /* --- UTF-8 BOM, as added by Windows editors --- */
-    check_cfg("BOM + CRLF", "\xEF\xBB\xBFl1_prefetch=on\r\n", -1, 1, 0, 0);
-    check_cfg("BOM + LF", "\xEF\xBB\xBFprobe_only=on\n", -1, 0, 0, 1);
-    check_cfg("BOM alone", "\xEF\xBB\xBF", -1, 0, 0, 0);
+    /* --- defaults: nothing happens unless asked --- */
+    pfe_parse_config(NULL, 0, &c);
+    expect("default mode off", c.mode, PFE_MODE_OFF);
+    expect("default self_disable on", c.self_disable, 1);
+    expect("default offset keep", c.pl310_offset, -1);
+    expect("default bench.clocks max", c.bench_clocks_max, 1);
+    pfe_config_masks(&c, &m);
+    expect_hex("default masks all zero",
+               m.actlr_set | m.actlr_clear | m.pl310_set | m.pl310_clear, 0);
+
+    /* --- line endings and BOM: the whole point of this parser --- */
+    expect("LF", mode_of("mode=apply\n"), PFE_MODE_APPLY);
+    expect("CRLF", mode_of("mode=apply\r\n"), PFE_MODE_APPLY);
+    expect("bare CR", mode_of("x=1\rmode=apply\r"), PFE_MODE_APPLY);
+    expect("mixed LF/CRLF", mode_of("x=1\nmode=probe\r\n"), PFE_MODE_PROBE);
+    expect("no trailing newline", mode_of("mode=bench"), PFE_MODE_BENCH);
+    expect("CRLF blank lines", mode_of("\r\n\r\nmode=apply\r\n\r\n"), PFE_MODE_APPLY);
+    expect("BOM + CRLF", mode_of("\xEF\xBB\xBF" "mode=apply\r\n"), PFE_MODE_APPLY);
+    expect("BOM alone", mode_of("\xEF\xBB\xBF"), PFE_MODE_OFF);
+    expect("BOM before dotted key",
+           dside_of("\xEF\xBB\xBF" "actlr.l1_dside_prefetch=on\r\n"), PFE_ON);
 
     /* --- whitespace, case, comments --- */
-    check_cfg("spaces around =", "  l1_prefetch  =  on  \n", -1, 1, 0, 0);
-    check_cfg("tabs", "\tl2_prefetch\t=\ton\t\n", -1, 0, 1, 0);
-    check_cfg("uppercase key and value", "L1_PREFETCH=ON\n", -1, 1, 0, 0);
-    check_cfg("mixed case value", "l1_prefetch=On\n", -1, 1, 0, 0);
-    check_cfg("comment", "#l1_prefetch=on\n", -1, 0, 0, 0);
-    check_cfg("indented comment", "   # l1_prefetch=on\n", -1, 0, 0, 0);
-    check_cfg("comment after CRLF", "probe_only=on\r\n#l1_prefetch=on\r\n",
-              -1, 0, 0, 1);
+    expect("spaces around =", mode_of("  mode  =  apply  \n"), PFE_MODE_APPLY);
+    expect("tabs", mode_of("\tmode\t=\tapply\t\n"), PFE_MODE_APPLY);
+    expect("uppercase", mode_of("MODE=APPLY\n"), PFE_MODE_APPLY);
+    expect("comment line", mode_of("#mode=apply\n"), PFE_MODE_OFF);
+    expect("indented comment", mode_of("   # mode=apply\n"), PFE_MODE_OFF);
+    expect("trailing comment", mode_of("mode = apply   # do it\n"), PFE_MODE_APPLY);
+    expect("trailing comment on tri",
+           dside_of("actlr.l1_dside_prefetch = on # bit 2\n"), PFE_ON);
 
-    /* --- anything unrecognised must stay off, never on --- */
-    check_cfg("empty", "", 0, 0, 0, 0);
-    check_cfg("garbage value", "l1_prefetch=yes\n", -1, 0, 0, 0);
-    check_cfg("value 1 is not 'on'", "l1_prefetch=1\n", -1, 0, 0, 0);
-    check_cfg("no equals", "l1_prefetch on\n", -1, 0, 0, 0);
-    check_cfg("unknown key", "l3_prefetch=on\n", -1, 0, 0, 0);
-    check_cfg("key is a prefix, not equal", "l1_prefetch_x=on\n", -1, 0, 0, 0);
-    check_cfg("empty value", "l1_prefetch=\n", -1, 0, 0, 0);
-    check_cfg("last wins", "l1_prefetch=on\nl1_prefetch=off\n", -1, 0, 0, 0);
-    check_cfg("last wins, other way",
-              "l1_prefetch=off\nl1_prefetch=on\n", -1, 1, 0, 0);
-    check_cfg("all three", "probe_only=on\nl1_prefetch=on\nl2_prefetch=on\n",
-              -1, 1, 1, 1);
+    /* --- mode --- */
+    expect("mode garbage => off", mode_of("mode=fast\n"), PFE_MODE_OFF);
+    expect("mode garbage counted", ignored_of("mode=fast\n"), 1);
+    expect("mode last wins", mode_of("mode=apply\nmode=off\n"), PFE_MODE_OFF);
+    expect("old key probe_only ignored", mode_of("probe_only=on\n"), PFE_MODE_OFF);
+    expect("old keys counted as ignored",
+           ignored_of("probe_only=on\nl1_prefetch=on\nl2_prefetch=on\n"), 3);
 
-    /* The shipped example file must actually parse - this is the regression
-     * test for the handout whose keys sat past the old 256-byte buffer. */
+    /* --- self_disable: only an explicit no turns the switch off --- */
+    parse("self_disable=no\n", &c);      expect("self_disable=no", c.self_disable, 0);
+    parse("self_disable=NO\r\n", &c);   expect("self_disable=NO CRLF", c.self_disable, 0);
+    parse("self_disable=yes\n", &c);     expect("self_disable=yes", c.self_disable, 1);
+    parse("self_disable=off\n", &c);     expect("self_disable=off is not no", c.self_disable, 1);
+    parse("self_disable=0\n", &c);       expect("self_disable=0 is not no", c.self_disable, 1);
+    parse("#self_disable=no\n", &c);     expect("self_disable commented", c.self_disable, 1);
+
+    /* --- tri-states: keep must differ from off --- */
+    expect("tri on", dside_of("actlr.l1_dside_prefetch=on\n"), PFE_ON);
+    expect("tri off", dside_of("actlr.l1_dside_prefetch=off\n"), PFE_OFF);
+    expect("tri keep", dside_of("actlr.l1_dside_prefetch=keep\n"), PFE_KEEP);
+    expect("tri garbage => keep", dside_of("actlr.l1_dside_prefetch=yes\n"), PFE_KEEP);
+    expect("tri garbage counted", ignored_of("actlr.l1_dside_prefetch=1\n"), 1);
+    expect("tri garbage keeps earlier value",
+           dside_of("actlr.l1_dside_prefetch=on\nactlr.l1_dside_prefetch=1\n"), PFE_ON);
+    expect("prefix of key is not the key", dside_of("actlr.l1_dside=on\n"), PFE_KEEP);
+    expect("key without register prefix", dside_of("l1_dside_prefetch=on\n"), PFE_KEEP);
+
+    /* --- every field maps to the right bit --- */
+    parse("actlr.l1_dside_prefetch=on\nactlr.l2_prefetch_hint=on\n"
+          "actlr.write_full_zeros=off\nactlr.alloc_one_way=off\n", &c);
+    pfe_config_masks(&c, &m);
+    expect_hex("actlr set", m.actlr_set, 0x6);
+    expect_hex("actlr clear", m.actlr_clear, 0x108);
+    expect_hex("actlr only touches actlr", m.pl310_set | m.pl310_clear, 0);
+
+    parse("pl310.data_prefetch=on\npl310.instr_prefetch=off\n"
+          "pl310.prefetch_drop=off\npl310.double_linefill=on\n"
+          "pl310.incr_double_linefill=off\npl310.prefetch_offset=15\n", &c);
+    pfe_config_masks(&c, &m);
+    expect_hex("pl310 set", m.pl310_set, 0x5000000F);
+    expect_hex("pl310 clear", m.pl310_clear, 0x2180001F);
+    expect_hex("pl310 only touches pl310", m.actlr_set | m.actlr_clear, 0);
+
+    /* The measured-best settings reproduce boot 36's register values. */
+    parse("mode=apply\nactlr.l1_dside_prefetch=on\nactlr.l2_prefetch_hint=on\n"
+          "pl310.data_prefetch=on\npl310.prefetch_offset=15\n", &c);
+    pfe_config_masks(&c, &m);
+    expect_hex("best: ACTLR 0x149 -> 0x14F",
+               (0x149u & ~m.actlr_clear) | m.actlr_set, 0x14F);
+    expect_hex("best: PL310 0x21000000 -> 0x3100000F",
+               (0x21000000u & ~m.pl310_clear) | m.pl310_set, 0x3100000F);
+
+    /* --- prefetch offset --- */
+    expect("offset 0", offset_of("pl310.prefetch_offset=0\n"), 0);
+    expect("offset 7", offset_of("pl310.prefetch_offset=7\n"), 7);
+    expect("offset 15", offset_of("pl310.prefetch_offset=15\n"), 15);
+    expect("offset 23 accepted (warned about)", offset_of("pl310.prefetch_offset=23\n"), 23);
+    expect("offset 31 CRLF", offset_of("pl310.prefetch_offset=31\r\n"), 31);
+    expect("offset keep", offset_of("pl310.prefetch_offset=keep\n"), -1);
+    expect("offset 8 not a TRM value", offset_of("pl310.prefetch_offset=8\n"), -1);
+    expect("offset 32", offset_of("pl310.prefetch_offset=32\n"), -1);
+    expect("offset hex", offset_of("pl310.prefetch_offset=0x7\n"), -1);
+    expect("offset negative", offset_of("pl310.prefetch_offset=-1\n"), -1);
+    expect("offset 3 digits", offset_of("pl310.prefetch_offset=007\n"), -1);
+    expect("offset empty", offset_of("pl310.prefetch_offset=\n"), -1);
+    expect("offset bad counted", ignored_of("pl310.prefetch_offset=8\n"), 1);
+    parse("pl310.prefetch_offset=0\n", &c);
+    pfe_config_masks(&c, &m);
+    expect_hex("offset 0 still clears the field", m.pl310_clear, 0x1F);
+
+    /* --- bench.clocks --- */
+    parse("bench.clocks=keep\n", &c);  expect("bench.clocks keep", c.bench_clocks_max, 0);
+    parse("bench.clocks=max\n", &c);   expect("bench.clocks max", c.bench_clocks_max, 1);
+    parse("bench.clocks=500\n", &c);   expect("bench.clocks garbage => max", c.bench_clocks_max, 1);
+
+    /* --- unknown lines are counted, never acted on --- */
+    expect("no equals counted", ignored_of("mode apply\n"), 1);
+    expect("unknown key counted", ignored_of("actlr.exclusive_cache=on\n"), 1);
+    expect("blank and comment lines not counted", ignored_of("\n# x\n\n"), 0);
+
+    /* The shipped example file must actually parse, every line recognised. */
     {
         FILE *f = fopen("prefetch_enabler.txt.example", "rb");
         if (!f) f = fopen("../prefetch_enabler.txt.example", "rb");
         if (!f) {
-            printf("FAIL %-44s cannot open example config\n", "example file");
+            printf("FAIL %-48s cannot open example config\n", "example file");
             failures++;
         } else {
             static char big[8192];
             int n = (int)fread(big, 1, sizeof(big), f);
             fclose(f);
-            struct pfe_config c;
             pfe_parse_config(big, n, &c);
-            /* every key present and recognised => all three default to off */
-            if (c.want_l1 || c.want_l2 || c.probe_only) {
-                printf("FAIL %-44s example turns something on\n", "example file");
-                failures++;
-            } else {
-                printf("ok   example file parses (%d bytes)\n", n);
-            }
+            expect("example: every line recognised", c.ignored, 0);
+            int lines = 0;
+            for (int i = 0; i < n; i++) lines += big[i] == '\n';
+            expect("example fits the device buffer even as CRLF",
+                   n + lines <= PFE_CONFIG_MAX_BYTES, 1);
+            expect("example: mode off as shipped", c.mode, PFE_MODE_OFF);
+            expect("example: self_disable on", c.self_disable, 1);
+            pfe_config_masks(&c, &m);
+            expect_hex("example: ACTLR 0x149 -> 0x14F if applied",
+                       (0x149u & ~m.actlr_clear) | m.actlr_set, 0x14F);
+            expect_hex("example: PL310 -> 0x3100000F if applied",
+                       (0x21000000u & ~m.pl310_clear) | m.pl310_set, 0x3100000F);
         }
     }
-
-    /* --- tri-state: "leave it alone" must differ from "clear it" --- */
-    check_tri("tri: absent => KEEP", "l1_prefetch=on\n", PFE_KEEP);
-    check_tri("tri: on", "actlr_alloc_one_way=on\n", PFE_ON);
-    check_tri("tri: off", "actlr_alloc_one_way=off\n", PFE_OFF);
-    check_tri("tri: OFF uppercase", "ACTLR_ALLOC_ONE_WAY=OFF\n", PFE_OFF);
-    check_tri("tri: CRLF", "actlr_alloc_one_way=off\r\n", PFE_OFF);
-    /* split: 'a' is a hex digit, so it would extend the \xBF escape */
-    check_tri("tri: BOM+CRLF", "\xEF\xBB\xBF" "actlr_alloc_one_way=off\r\n", PFE_OFF);
-    check_tri("tri: spaces", "  actlr_alloc_one_way = off  \n", PFE_OFF);
-    check_tri("tri: garbage => KEEP", "actlr_alloc_one_way=maybe\n", PFE_KEEP);
-    check_tri("tri: empty => KEEP", "actlr_alloc_one_way=\n", PFE_KEEP);
-    check_tri("tri: commented => KEEP", "#actlr_alloc_one_way=off\n", PFE_KEEP);
-    check_tri("tri: last wins",
-              "actlr_alloc_one_way=off\nactlr_alloc_one_way=on\n", PFE_ON);
-    check_tri("tri: does not match l1_prefetch key",
-              "l1_prefetch=off\n", PFE_KEEP);
-
-    /* --- bench --- */
-    check_bench("bench: default off", "probe_only=on\n", 0);
-    check_bench("bench: on", "bench=on\n", 1);
-    check_bench("bench: CRLF", "bench=on\r\n", 1);
-    check_bench("bench: off", "bench=off\n", 0);
-    check_bench("bench: commented", "#bench=on\n", 0);
-    check_bench("bench: not a prefix match", "benchmark=on\n", 0);
-
-    /* --- l2_prefetch_offset --- */
-    check_off("offset: default", "l2_prefetch=on\n", 15);
-    check_off("offset: empty file", "", 15);
-    check_off("offset: 0", "l2_prefetch_offset=0\n", 0);
-    check_off("offset: 7", "l2_prefetch_offset=7\n", 7);
-    check_off("offset: 31 CRLF", "l2_prefetch_offset=31\r\n", 31);
-    check_off("offset: spaces", "  l2_prefetch_offset = 7 \n", 7);
-    check_off("offset: 23 refused (errata)", "l2_prefetch_offset=23\n", 15);
-    check_off("offset: 8 not a TRM value", "l2_prefetch_offset=8\n", 15);
-    check_off("offset: 32 out of range", "l2_prefetch_offset=32\n", 15);
-    check_off("offset: negative", "l2_prefetch_offset=-1\n", 15);
-    check_off("offset: hex not accepted", "l2_prefetch_offset=0x7\n", 15);
-    check_off("offset: 3 digits", "l2_prefetch_offset=007\n", 15);
-    check_off("offset: garbage", "l2_prefetch_offset=fast\n", 15);
-    check_off("offset: empty value", "l2_prefetch_offset=\n", 15);
-    check_off("offset: commented", "#l2_prefetch_offset=7\n", 15);
-    check_off("offset: l2_prefetch key not confused", "l2_prefetch=7\n", 15);
 
     /* --- dead-man's switch --- */
     check_comment("switch: LF",

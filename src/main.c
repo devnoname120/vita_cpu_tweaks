@@ -42,6 +42,7 @@
  */
 #include <psp2kern/kernel/modulemgr.h>
 #include <psp2kern/kernel/threadmgr.h>
+#include <psp2kern/power.h>
 #include <psp2kern/kernel/sysmem.h>
 #include <psp2kern/kernel/debug.h>
 #include <psp2kern/kernel/sysclib.h>
@@ -117,11 +118,8 @@ static void build_actlr_stub(unsigned int *w, unsigned int set_mask,
     w[8] = set_mask;     /* +20                                         */
 }
 
-/* ACTLR fields this plugin touches (Cortex-A9 TRM Table 4-36). */
-#define ACTLR_L2_PREFETCH_HINT  (1u << 1)
-#define ACTLR_L1_DSIDE_PREFETCH (1u << 2)
-#define ACTLR_ALLOC_ONE_WAY     (1u << 8)
-#define ACTLR_PREFETCH_BITS     (ACTLR_L2_PREFETCH_HINT | ACTLR_L1_DSIDE_PREFETCH)
+/* The ACTLR and PL310 field bits themselves live in config.h (PFE_ACTLR_*,
+ * PFE_PL310_*), next to the config keys that drive them. */
 
 extern int splCl_smc(unsigned int a0, unsigned int a1, unsigned int a2,
                      unsigned int a3, unsigned int idx);
@@ -135,10 +133,8 @@ extern int SPLx_TZS_WRITE32(unsigned int sva, unsigned int val);
 
 /* PL310 L2C-310 PREFETCH_CTRL. Base 0x1A002000 is identity-mapped secure RW
  * (boot 9 PRINTTBR: L1_SECTn 0x1A000000 1M, AP=001), so its secure VA equals
- * its PA. Bit 28 = data prefetch enable - same bit the old pl310_set stub set,
- * but reached by a secure write instead of secure code execution. */
+ * its PA. Reached by a secure write instead of secure code execution. */
 #define PL310_PREFETCH_CTRL_SVA 0x1A002F60u
-#define PL310_DATA_PREFETCH_EN  0x10000000u
 
 /* Sized for a full SPLx_TZS_PRINTTBR(1) secure page-table dump (both TTBRs,
  * L1 sections plus their L2 pages) on top of the ordinary boot log. */
@@ -391,7 +387,7 @@ static void read_config(struct pfe_config *cfg)
 {
     pfe_parse_config(NULL, 0, cfg);   /* initialise every field to its default */
 
-    static char buf[4096];
+    static char buf[PFE_CONFIG_MAX_BYTES];
 
     SceIoStat st;
     memset(&st, 0, sizeof(st));
@@ -418,14 +414,34 @@ static void read_config(struct pfe_config *cfg)
     pfe_parse_config(buf, n, cfg);
 
     log_hex_line("config: bytes parsed ", (unsigned int)n);
-    log_line(cfg->probe_only ? "config: probe_only=on"  : "config: probe_only=off");
-    log_line(cfg->bench      ? "config: bench=on"       : "config: bench=off");
-    log_line(cfg->want_l1    ? "config: l1_prefetch=on" : "config: l1_prefetch=off");
-    log_line(cfg->want_l2    ? "config: l2_prefetch=on" : "config: l2_prefetch=off");
-    log_hex_line("config: l2_prefetch_offset ", (unsigned int)cfg->l2_offset);
-    log_line(cfg->alloc_one_way == PFE_ON  ? "config: actlr_alloc_one_way=on"  :
-             cfg->alloc_one_way == PFE_OFF ? "config: actlr_alloc_one_way=off" :
-                                             "config: actlr_alloc_one_way=keep");
+    static const char *const modes[] = { "off", "apply", "probe", "bench" };
+    static const char *const tri[] = { "keep", "on", "off" };
+    char line[96];
+    snprintf(line, sizeof(line), "config: mode=%s self_disable=%s",
+             modes[cfg->mode & 3], cfg->self_disable ? "yes" : "no");
+    log_line(line);
+    for (int i = 0; i < PFE_ACTLR_NFIELDS; i++) {
+        snprintf(line, sizeof(line), "config: %s=%s",
+                 pfe_actlr_fields[i].key, tri[cfg->actlr[i] % 3]);
+        log_line(line);
+    }
+    for (int i = 0; i < PFE_PL310_NFIELDS; i++) {
+        snprintf(line, sizeof(line), "config: %s=%s",
+                 pfe_pl310_fields[i].key, tri[cfg->pl310[i] % 3]);
+        log_line(line);
+    }
+    if (cfg->pl310_offset < 0)
+        log_line("config: pl310.prefetch_offset=keep");
+    else {
+        snprintf(line, sizeof(line), "config: pl310.prefetch_offset=%d", cfg->pl310_offset);
+        log_line(line);
+    }
+    log_line(cfg->bench_clocks_max ? "config: bench.clocks=max" : "config: bench.clocks=keep");
+    if (cfg->ignored) {
+        snprintf(line, sizeof(line),
+                 "config: %d line(s) IGNORED - unknown key or bad value", cfg->ignored);
+        log_line(line);
+    }
 }
 
 /*
@@ -1169,7 +1185,6 @@ static int apply_l1_actlr(unsigned int set_mask, unsigned int clear_mask)
     return (visible && g_actlr_ok == 4) ? 0 : -1;
 }
 
-#define PL310_PREFETCH_OFFSET   0x1Fu
 
 /*
  * Secure read-modify-write of PL310 PREFETCH_CTRL: clears `clear`, then sets
@@ -1226,31 +1241,45 @@ static int pl310_prefetch_rmw(unsigned int clear, unsigned int set,
  * PL310 prefetch offset 23 is deliberately absent: ARM errata 765569 - the
  * prefetcher can cross a 4 KB boundary with that value - and the Vita's
  * r3p1-50rel0 part predates the fix. Double linefill is likewise never set
- * (errata 752271, see the analysis README).
+ * here (errata 752271, data corruption).
  */
 struct bench_leg {
     const char  *name;
-    unsigned int actlr_set, actlr_clear;
-    unsigned int pctl;          /* PL310 data-prefetch bit and offset field */
+    unsigned int actlr_set, actlr_clear;   /* within B_ACTLR_OWNED */
+    unsigned int pctl;                      /* value of B_PCTL_OWNED */
 };
 
-#define B_AOW ACTLR_ALLOC_ONE_WAY
-#define B_PF  ACTLR_PREFETCH_BITS
-#define B_DPF PL310_DATA_PREFETCH_EN
-#define B_PCTL_OWNED (PL310_DATA_PREFETCH_EN | PL310_PREFETCH_OFFSET)
+#define B_AOW   PFE_ACTLR_ALLOC_ONE_WAY
+#define B_DSIDE PFE_ACTLR_L1_DSIDE_PREFETCH
+#define B_HINT  PFE_ACTLR_L2_PREFETCH_HINT
+#define B_PF    (B_DSIDE | B_HINT)
+#define B_DPF   PFE_PL310_DATA_PREFETCH
+#define B_DROP  PFE_PL310_PREFETCH_DROP
+#define B_ACTLR_OWNED (B_AOW | B_PF)
+#define B_PCTL_OWNED  (B_DPF | B_DROP | PFE_PL310_OFFSET_MASK)
 
+/*
+ * ACTLR bit 8 (alloc one way) stays at the firmware's 1 throughout: boots
+ * 33-35 measured it neutral. The dside/hint split and prefetch drop are what
+ * the per-field config keys newly expose, so they get their own legs.
+ */
 static const struct bench_leg g_legs[] = {
-    { "base",          B_AOW,        B_PF,         0 },
-    { "aow_off",       0,            B_AOW | B_PF, 0 },
-    { "l1pf",          B_AOW | B_PF, 0,            0 },
-    { "l2pf_o0",       B_AOW,        B_PF,         B_DPF | 0 },
-    { "l1l2_o0",       B_AOW | B_PF, 0,            B_DPF | 0 },
-    { "l1l2_o7",       B_AOW | B_PF, 0,            B_DPF | 7 },
-    { "l1l2_o15",      B_AOW | B_PF, 0,            B_DPF | 15 },
-    { "l1l2_o31",      B_AOW | B_PF, 0,            B_DPF | 31 },
-    { "l1l2_o0_aowoff", B_PF,        B_AOW,        B_DPF | 0 },
-    { "base_again",    B_AOW,        B_PF,         0 },
+    { "base",            B_AOW,           B_PF,   B_DROP },
+    { "dside",           B_AOW | B_DSIDE, B_HINT, B_DROP },
+    { "l1pf",            B_AOW | B_PF,    0,      B_DROP },
+    { "l2_o15",          B_AOW,           B_PF,   B_DROP | B_DPF | 15 },
+    { "dside_l2_o15",    B_AOW | B_DSIDE, B_HINT, B_DROP | B_DPF | 15 },
+    { "l1l2_o0",         B_AOW | B_PF,    0,      B_DROP | B_DPF | 0 },
+    { "l1l2_o7",         B_AOW | B_PF,    0,      B_DROP | B_DPF | 7 },
+    { "l1l2_o15",        B_AOW | B_PF,    0,      B_DROP | B_DPF | 15 },
+    { "l1l2_o31",        B_AOW | B_PF,    0,      B_DROP | B_DPF | 31 },
+    { "l1l2_o15_nodrop", B_AOW | B_PF,    0,      B_DPF | 15 },
+    { "base_again",      B_AOW,           B_PF,   B_DROP },
 };
+
+/* Every leg twice, interleaved, so slow drift and one-off noise show up as
+ * disagreement between rounds instead of as a difference between legs. */
+#define BENCH_ROUNDS 2
 
 static void log_bench_res(const char *kind, unsigned int param,
                           const struct pfe_bench_res *r)
@@ -1279,7 +1308,61 @@ static int bench_leg_thread(SceSize args, void *argp)
     return 0;
 }
 
-static void run_bench_suite(void)
+/*
+ * Clocks for bench.clocks=max: what games run at. 500 MHz needs a clock
+ * plugin (PSVshell turns a 500 request into 444 x 16/15); without one the
+ * setter refuses it and 444 is used instead. Each leg logs the clock it
+ * actually ran at (cycles / microseconds), so this is checked, not assumed.
+ */
+extern int kscePowerGetGpuClockFrequencyInternal(void);
+
+struct clocks { int arm, bus, gpu, xbar; };
+
+static void log_clocks(const char *what)
+{
+    char line[96];
+    snprintf(line, sizeof(line), "bench clocks %s: arm %d bus %d gpu %d xbar %d", what,
+             kscePowerGetArmClockFrequency(), kscePowerGetBusClockFrequency(),
+             kscePowerGetGpuClockFrequencyInternal(),
+             kscePowerGetGpuXbarClockFrequency());
+    log_line(line);
+}
+
+static int gpu_clock_valid(int f)
+{
+    return f == 41 || f == 55 || f == 83 || f == 111 || f == 166 || f == 222;
+}
+
+static void clocks_save(struct clocks *c)
+{
+    c->arm  = kscePowerGetArmClockFrequency();
+    c->bus  = kscePowerGetBusClockFrequency();
+    c->gpu  = kscePowerGetGpuClockFrequencyInternal();
+    c->xbar = kscePowerGetGpuXbarClockFrequency();
+}
+
+static void clocks_max(void)
+{
+    int r = kscePowerSetArmClockFrequency(500);
+    if (r < 0) {
+        log_hex_line("bench: arm 500 refused, using 444: ", (unsigned int)r);
+        kscePowerSetArmClockFrequency(444);
+    }
+    kscePowerSetBusClockFrequency(222);
+    kscePowerSetGpuClockFrequency(222);
+    kscePowerSetGpuXbarClockFrequency(166);
+}
+
+static void clocks_restore(const struct clocks *c)
+{
+    if (c->arm  > 0) kscePowerSetArmClockFrequency(c->arm);
+    if (c->bus  > 0) kscePowerSetBusClockFrequency(c->bus);
+    if (c->xbar > 0) kscePowerSetGpuXbarClockFrequency(c->xbar);
+    /* The GPU getter is an internal one; only trust a value it could be. */
+    if (gpu_clock_valid(c->gpu)) kscePowerSetGpuClockFrequency(c->gpu);
+}
+
+static void run_bench_suite(int clocks_to_max)
 {
     unsigned int orig_actlr = 0, orig_pctl = 0;
     __asm__ __volatile__("mrc p15, 0, %0, c1, c0, 1" : "=r"(orig_actlr));
@@ -1297,37 +1380,59 @@ static void run_bench_suite(void)
         pfe_bench_fini();
         return;
     }
+
+    struct clocks saved;
+    clocks_save(&saved);
+    log_clocks("before");
+    if (clocks_to_max) {
+        clocks_max();
+        log_clocks("max");
+    }
     flush_log_to_disk();
 
-    for (unsigned int i = 0; i < sizeof(g_legs) / sizeof(g_legs[0]); i++) {
-        const struct bench_leg *L = &g_legs[i];
-        char line[64];
-        snprintf(line, sizeof(line), "bench leg %s", L->name);
-        log_line(line);
-        if (apply_l1_actlr(L->actlr_set, L->actlr_clear) < 0) {
-            log_line("bench: ACTLR leg setup failed - stopping the suite");
-            break;
-        }
-        if (pl310_prefetch_rmw(B_PCTL_OWNED, L->pctl, NULL, NULL) < 0) {
-            log_line("bench: PL310 leg setup failed - stopping the suite");
-            break;
-        }
-        flush_log_to_disk();
+    int stop = 0;
+    for (int round = 0; round < BENCH_ROUNDS && !stop; round++) {
+        log_hex_line("bench round ", (unsigned int)round);
+        for (unsigned int i = 0; i < sizeof(g_legs) / sizeof(g_legs[0]); i++) {
+            const struct bench_leg *L = &g_legs[i];
+            char line[64];
+            snprintf(line, sizeof(line), "bench leg %s", L->name);
+            log_line(line);
+            if (apply_l1_actlr(L->actlr_set, L->actlr_clear) < 0) {
+                log_line("bench: ACTLR leg setup failed - stopping the suite");
+                stop = 1;
+                break;
+            }
+            if (pl310_prefetch_rmw(B_PCTL_OWNED, L->pctl, NULL, NULL) < 0) {
+                log_line("bench: PL310 leg setup failed - stopping the suite");
+                stop = 1;
+                break;
+            }
+            flush_log_to_disk();
 
-        SceUID th = ksceKernelCreateThread("pfe_bench", bench_leg_thread,
-                                           0x10, 0x4000, 0, 0x10000, NULL);
-        if (th < 0) { log_hex_line("bench: thread create failed ", (unsigned int)th); break; }
-        if (ksceKernelStartThread(th, 0, NULL) >= 0)
-            ksceKernelWaitThreadEnd(th, NULL, NULL);
-        ksceKernelDeleteThread(th);
-        log_line("bench leg end");
-        flush_log_to_disk();
+            SceUID th = ksceKernelCreateThread("pfe_bench", bench_leg_thread,
+                                               0x10, 0x4000, 0, 0x10000, NULL);
+            if (th < 0) {
+                log_hex_line("bench: thread create failed ", (unsigned int)th);
+                stop = 1;
+                break;
+            }
+            if (ksceKernelStartThread(th, 0, NULL) >= 0)
+                ksceKernelWaitThreadEnd(th, NULL, NULL);
+            ksceKernelDeleteThread(th);
+            log_line("bench leg end");
+            flush_log_to_disk();
+        }
     }
 
     /* Put back exactly what the firmware had. */
-    log_line("bench: restoring firmware ACTLR and PL310 state");
-    apply_l1_actlr(orig_actlr & (B_AOW | B_PF), ~orig_actlr & (B_AOW | B_PF));
+    log_line("bench: restoring firmware ACTLR, PL310 and clocks");
+    apply_l1_actlr(orig_actlr & B_ACTLR_OWNED, ~orig_actlr & B_ACTLR_OWNED);
     pl310_prefetch_rmw(B_PCTL_OWNED, orig_pctl & B_PCTL_OWNED, NULL, NULL);
+    if (clocks_to_max) {
+        clocks_restore(&saved);
+        log_clocks("restored");
+    }
     pfe_bench_fini();
     log_hex_line("bench: uptime ms at end ",
                  (unsigned int)(ksceKernelGetSystemTimeWide() / 1000u));
@@ -1335,7 +1440,7 @@ static void run_bench_suite(void)
 }
 
 /*
- * The suite takes about 9 seconds. Run inside module_start() it blocks boot
+ * The suite takes tens of seconds. Run inside module_start() it blocks boot
  * for that long, and that is enough to make SceShell's MTP server fail to
  * start (sceMtpStart 0x80540008, interface 0x80543601) - whose error path then
  * calls a null function pointer and takes the shell down. Boots 33 and 34
@@ -1344,11 +1449,13 @@ static void run_bench_suite(void)
  */
 #define BENCH_START_DELAY_US (30u * 1000u * 1000u)
 
+static int g_bench_clocks_max;
+
 static int bench_main_thread(SceSize args, void *argp)
 {
     (void)args; (void)argp;
     ksceKernelDelayThread(BENCH_START_DELAY_US);
-    run_bench_suite();
+    run_bench_suite(g_bench_clocks_max);
     probe_cpu_regs();
     log_line("==== vita_prefetch_enabler bench done ====");
     flush_log_to_disk();
@@ -1359,42 +1466,38 @@ int module_start(SceSize argc, const void *args)
 {
     (void)argc; (void)args;
 
-    const char *disable_reason = "";
-    int disabled = self_disable_in_config(&disable_reason);
-
     g_log_len = 0;
     log_line("==== vita_prefetch_enabler boot start ====");
-    if (disabled) {
-        log_line("selfdisable: own config.txt line commented out for next boot");
-    } else {
-        log_line("selfdisable: FAILED - aborting before any secure-world work");
-        log_line(disable_reason);
-        goto write_out;
-    }
 
+    /*
+     * The config is read before the dead-man's switch so that
+     * self_disable=no can be honoured. Reading it is plain file I/O with no
+     * secure-world work, so nothing risky happens before the switch either way.
+     */
     struct pfe_config cfg;
     read_config(&cfg);
 
-    /*
-     * Which ACTLR bits to set and which to clear. Separating the two is what
-     * lets a bit the *firmware* set be turned back off: ACTLR bit 8
-     * (allocation in one cache way only) resets to zero per the Cortex-A9
-     * TRM, yet reads back as 1 on this hardware, so only an explicit clear
-     * can test what it costs.
-     */
-    unsigned int actlr_set_mask = 0, actlr_clear_mask = 0;
-    if (cfg.want_l1) actlr_set_mask |= ACTLR_PREFETCH_BITS;
-    if (cfg.alloc_one_way == PFE_ON)       actlr_set_mask   |= ACTLR_ALLOC_ONE_WAY;
-    else if (cfg.alloc_one_way == PFE_OFF) actlr_clear_mask |= ACTLR_ALLOC_ONE_WAY;
+    if (cfg.self_disable) {
+        const char *disable_reason = "";
+        if (self_disable_in_config(&disable_reason)) {
+            log_line("selfdisable: own config.txt line commented out for next boot");
+        } else {
+            log_line("selfdisable: FAILED - aborting before any secure-world work");
+            log_line(disable_reason);
+            goto write_out;
+        }
+    } else {
+        log_line("selfdisable: self_disable=no - staying enabled for next boot");
+    }
 
-    int want_actlr = (actlr_set_mask | actlr_clear_mask) != 0;
-    int want_l2 = cfg.want_l2;
-    int probe_only = cfg.probe_only;
+    struct pfe_masks mk;
+    pfe_config_masks(&cfg, &mk);
+    int want_actlr = (mk.actlr_set | mk.actlr_clear) != 0;
+    int want_pl310 = (mk.pl310_set | mk.pl310_clear) != 0;
 
-    int bench = cfg.bench;
-
-    if (!want_actlr && !want_l2 && !probe_only && !bench) {
-        log_line("nothing to enable, exiting cleanly");
+    if (cfg.mode == PFE_MODE_OFF ||
+        (cfg.mode == PFE_MODE_APPLY && !want_actlr && !want_pl310)) {
+        log_line("nothing to do, exiting cleanly");
         goto write_out;
     }
 
@@ -1409,19 +1512,20 @@ int module_start(SceSize argc, const void *args)
         flush_log_to_disk(); /* checkpoint: past the point every prior boot failed at */
     }
 
-    if (probe_only) {
+    if (cfg.mode == PFE_MODE_PROBE) {
         probe_cpu_regs();
         probe_secure_layout();
         probe_sysmem_tail();
         probe_ddr_firewall();
-        log_line("probe_only: skipping all EXEC_WITH_SP calls");
+        log_line("probe: skipping all EXEC_WITH_SP calls");
         goto write_out;
     }
 
-    if (bench) {
+    if (cfg.mode == PFE_MODE_BENCH) {
         /* The suite sets every leg itself and restores the firmware state
-         * afterwards, so the l1/l2/alloc keys are ignored in this mode. */
-        log_line("bench=on: suite deferred to a thread, starting in 30 s; other keys ignored");
+         * afterwards, so the register keys are ignored in this mode. */
+        log_line("mode=bench: suite deferred to a thread, starting in 30 s");
+        g_bench_clocks_max = cfg.bench_clocks_max;
         SceUID th = ksceKernelCreateThread("pfe_bench_main", bench_main_thread,
                                            0x60, 0x4000, 0, 0, NULL);
         if (th < 0 || ksceKernelStartThread(th, 0, NULL) < 0)
@@ -1429,27 +1533,23 @@ int module_start(SceSize argc, const void *args)
         goto write_out;
     }
 
+    /* mode=apply */
     if (want_actlr) {
-        apply_l1_actlr(actlr_set_mask, actlr_clear_mask);
+        apply_l1_actlr(mk.actlr_set, mk.actlr_clear);
         flush_log_to_disk();
     }
 
-    if (want_l2) {
+    if (want_pl310) {
+        if (mk.pl310_set & PFE_PL310_DOUBLE_LINEFILL)
+            log_line("pl310: WARNING double_linefill=on - ARM errata 752271 can corrupt data on this PL310 (r3p1-50rel0)");
+        if ((mk.pl310_clear & PFE_PL310_OFFSET_MASK) &&
+            (mk.pl310_set & PFE_PL310_OFFSET_MASK) == 23)
+            log_line("pl310: WARNING prefetch_offset=23 - ARM errata 765569, prefetch can cross a 4 KB page");
         unsigned int before = 0, after = 0;
-        /*
-         * Data prefetch and the prefetch offset go together: at the
-         * firmware's offset of 0, data prefetch adds nothing over the ACTLR
-         * prefetcher and is ~10% slower on its own at strides of 64 bytes
-         * and up (boots 33-35). Offset 23 never reaches here - the parser
-         * refuses it (errata 765569).
-         */
-        unsigned int off = (unsigned int)cfg.l2_offset & PL310_PREFETCH_OFFSET;
-        if (pl310_prefetch_rmw(PL310_DATA_PREFETCH_EN | PL310_PREFETCH_OFFSET,
-                               PL310_DATA_PREFETCH_EN | off, &before, &after) == 0 &&
-            (after & PL310_DATA_PREFETCH_EN))
-            log_line("l2_prefetch: PL310 data prefetch ENABLED");
+        if (pl310_prefetch_rmw(mk.pl310_clear, mk.pl310_set, &before, &after) == 0)
+            log_line("pl310: requested fields APPLIED");
         else
-            log_line("l2_prefetch: NOT enabled - see the lines above");
+            log_line("pl310: NOT applied - see the lines above");
         flush_log_to_disk();
     }
 

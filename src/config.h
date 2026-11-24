@@ -17,14 +17,59 @@ enum pfe_tri {
     PFE_OFF  = 2
 };
 
-struct pfe_config {
-    int want_l1;        /* l1_prefetch:   ACTLR bits 2 and 1 */
-    int want_l2;        /* l2_prefetch:   PL310 PREFETCH_CTRL bit 28 */
-    int probe_only;     /* probe_only:    read-only recon, no secure writes */
-    int alloc_one_way;  /* actlr_alloc_one_way: ACTLR bit 8, enum pfe_tri */
-    int bench;          /* bench:         run the memory benchmark suite */
-    int l2_offset;      /* l2_prefetch_offset: PL310 PREFETCH_CTRL[4:0] */
+enum pfe_mode {
+    PFE_MODE_OFF   = 0,  /* do nothing (the default) */
+    PFE_MODE_APPLY = 1,  /* apply the register fields below */
+    PFE_MODE_PROBE = 2,  /* read-only recon, no secure writes */
+    PFE_MODE_BENCH = 3   /* memory benchmark 30 s after boot, then restore */
 };
+
+/* The register bits the config can drive. */
+#define PFE_ACTLR_L2_PREFETCH_HINT     (1u << 1)
+#define PFE_ACTLR_L1_DSIDE_PREFETCH    (1u << 2)
+#define PFE_ACTLR_WRITE_FULL_ZEROS     (1u << 3)
+#define PFE_ACTLR_ALLOC_ONE_WAY        (1u << 8)
+
+#define PFE_PL310_DOUBLE_LINEFILL      (1u << 30)
+#define PFE_PL310_INSTR_PREFETCH       (1u << 29)
+#define PFE_PL310_DATA_PREFETCH        (1u << 28)
+#define PFE_PL310_PREFETCH_DROP        (1u << 24)
+#define PFE_PL310_INCR_DOUBLE_LINEFILL (1u << 23)
+#define PFE_PL310_OFFSET_MASK          0x1Fu
+
+/* One on|off|keep key per single-bit hardware field. */
+struct pfe_field {
+    const char  *key;     /* config key, e.g. "actlr.l1_dside_prefetch" */
+    unsigned int bit;     /* mask within its register */
+};
+
+#define PFE_ACTLR_NFIELDS 4
+#define PFE_PL310_NFIELDS 5
+extern const struct pfe_field pfe_actlr_fields[PFE_ACTLR_NFIELDS];
+extern const struct pfe_field pfe_pl310_fields[PFE_PL310_NFIELDS];
+
+struct pfe_config {
+    int mode;                         /* enum pfe_mode */
+    int self_disable;                 /* 1 unless self_disable=no */
+    int actlr[PFE_ACTLR_NFIELDS];     /* enum pfe_tri, same order as pfe_actlr_fields */
+    int pl310[PFE_PL310_NFIELDS];     /* enum pfe_tri, same order as pfe_pl310_fields */
+    int pl310_offset;                 /* -1 = keep, else 0-7, 15, 23 or 31 */
+    int bench_clocks_max;             /* bench.clocks: 1 = max (default), 0 = keep */
+    int ignored;                      /* lines with an unknown key or bad value */
+};
+
+/* Set/clear masks per register, compiled from the tri-states. */
+struct pfe_masks {
+    unsigned int actlr_set, actlr_clear;
+    unsigned int pl310_set, pl310_clear;
+};
+
+void pfe_config_masks(const struct pfe_config *cfg, struct pfe_masks *m);
+
+/* 0-7, 15, 23 and 31 are the L2C-310 TRM's valid prefetch offsets. 23 is
+ * valid but hits ARM errata 765569 on this PL310 revision - accepted, and
+ * warned about in the example config and the log. */
+int pfe_l2_offset_valid(int v);
 
 /*
  * Parses `n` bytes of `key = value` lines from ur0:data/prefetch_enabler.txt.
@@ -32,22 +77,17 @@ struct pfe_config {
  * Agnostic to line endings (LF, CRLF and bare CR all work), to a leading
  * UTF-8 BOM, to leading/trailing spaces and tabs around both key and value,
  * and to key/value case. Lines whose first non-blank character is '#' are
- * comments. Unrecognised keys and values are ignored, leaving that field at
- * its default - "off" for the booleans, PFE_KEEP for the tri-states - so a
- * malformed file can never turn something on or change a firmware setting.
+ * comments. Unrecognised keys and values are ignored and counted in
+ * `ignored`, leaving that field at its default - mode off, every register
+ * field PFE_KEEP - so a malformed file can never turn something on or change
+ * a firmware setting.
  *
  * Every field of *out is initialised, whatever the input.
  */
-/*
- * PL310 prefetch offset used when l2_prefetch=on and l2_prefetch_offset is
- * absent or invalid. 15 measured best overall (analysis README, boots 33-35);
- * the firmware's own 0 makes L2 data prefetch close to useless.
- */
-#define PFE_L2_OFFSET_DEFAULT 15
-
-/* Valid offsets per the L2C-310 TRM are 0-7, 15 and 31; 23 is also legal but
- * excluded here because of ARM errata 765569 (prefetch crosses a 4 KB page). */
-int pfe_l2_offset_valid(int v);
+/* Size of the on-device read buffer. A larger file is refused loudly rather
+ * than parsed truncated; the host tests check the shipped example fits even
+ * with CRLF line endings. */
+#define PFE_CONFIG_MAX_BYTES 16384
 
 void pfe_parse_config(const char *buf, int n, struct pfe_config *out);
 
