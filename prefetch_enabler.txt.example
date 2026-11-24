@@ -7,7 +7,9 @@
 probe_only=off
 l1_prefetch=off
 l2_prefetch=off
+l2_prefetch_offset=15
 actlr_alloc_one_way=keep
+bench=off
 
 # probe_only:   read-only recon -- dump the secure page-table layout to
 #               ur0:data/prefetch_enabler.log and make NO secure writes at
@@ -15,6 +17,13 @@ actlr_alloc_one_way=keep
 # l1_prefetch:  Cortex-A9 ACTLR L1 D-side prefetch + L2 prefetch hint
 #               (bits 2 and 1 -- note this is two separate features)
 # l2_prefetch:  ARM PL310 L2C-310 data prefetch (PREFETCH_CTRL bit 28)
+# l2_prefetch_offset:  0-7, 15 or 31 (default 15), used with l2_prefetch=on.
+#               How many lines ahead the PL310 prefetches. 15 measured best
+#               overall; at the firmware's 0, L2 prefetch is nearly useless.
+#               23 is refused (ARM errata 765569); anything invalid -> 15.
+# bench:        run a ~10 s memory benchmark 30 s after boot, logging to
+#               ur0:data/prefetch_enabler.log, then restore the firmware's
+#               settings. Ignores the keys above. For measurement only.
 #
 # actlr_alloc_one_way:  on | off | keep   (tri-state, default keep)
 #               ACTLR bit 8, "allocate in one cache way only". Unlike the
@@ -23,5 +32,5 @@ actlr_alloc_one_way=keep
 #               on all four cores, which confines L1 D-cache allocation to one
 #               of the four ways. "keep" leaves it as the firmware set it;
 #               "off" clears it. Verified writable and stable on retail 3.60,
-#               but its performance effect is UNMEASURED - see
-#               analysis/ebadmovp-investigation/README.md.
+#               and measured to make no difference either way (all of L1
+#               stays usable) - see analysis/ebadmovp-investigation/README.md.

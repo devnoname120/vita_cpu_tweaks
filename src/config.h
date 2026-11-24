@@ -23,6 +23,7 @@ struct pfe_config {
     int probe_only;     /* probe_only:    read-only recon, no secure writes */
     int alloc_one_way;  /* actlr_alloc_one_way: ACTLR bit 8, enum pfe_tri */
     int bench;          /* bench:         run the memory benchmark suite */
+    int l2_offset;      /* l2_prefetch_offset: PL310 PREFETCH_CTRL[4:0] */
 };
 
 /*
@@ -37,6 +38,17 @@ struct pfe_config {
  *
  * Every field of *out is initialised, whatever the input.
  */
+/*
+ * PL310 prefetch offset used when l2_prefetch=on and l2_prefetch_offset is
+ * absent or invalid. 15 measured best overall (analysis README, boots 33-35);
+ * the firmware's own 0 makes L2 data prefetch close to useless.
+ */
+#define PFE_L2_OFFSET_DEFAULT 15
+
+/* Valid offsets per the L2C-310 TRM are 0-7, 15 and 31; 23 is also legal but
+ * excluded here because of ARM errata 765569 (prefetch crosses a 4 KB page). */
+int pfe_l2_offset_valid(int v);
+
 void pfe_parse_config(const char *buf, int n, struct pfe_config *out);
 
 /*

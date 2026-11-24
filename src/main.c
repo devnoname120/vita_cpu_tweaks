@@ -422,6 +422,7 @@ static void read_config(struct pfe_config *cfg)
     log_line(cfg->bench      ? "config: bench=on"       : "config: bench=off");
     log_line(cfg->want_l1    ? "config: l1_prefetch=on" : "config: l1_prefetch=off");
     log_line(cfg->want_l2    ? "config: l2_prefetch=on" : "config: l2_prefetch=off");
+    log_hex_line("config: l2_prefetch_offset ", (unsigned int)cfg->l2_offset);
     log_line(cfg->alloc_one_way == PFE_ON  ? "config: actlr_alloc_one_way=on"  :
              cfg->alloc_one_way == PFE_OFF ? "config: actlr_alloc_one_way=off" :
                                              "config: actlr_alloc_one_way=keep");
@@ -1435,7 +1436,16 @@ int module_start(SceSize argc, const void *args)
 
     if (want_l2) {
         unsigned int before = 0, after = 0;
-        if (pl310_prefetch_rmw(0, PL310_DATA_PREFETCH_EN, &before, &after) == 0 &&
+        /*
+         * Data prefetch and the prefetch offset go together: at the
+         * firmware's offset of 0, data prefetch adds nothing over the ACTLR
+         * prefetcher and is ~10% slower on its own at strides of 64 bytes
+         * and up (boots 33-35). Offset 23 never reaches here - the parser
+         * refuses it (errata 765569).
+         */
+        unsigned int off = (unsigned int)cfg.l2_offset & PL310_PREFETCH_OFFSET;
+        if (pl310_prefetch_rmw(PL310_DATA_PREFETCH_EN | PL310_PREFETCH_OFFSET,
+                               PL310_DATA_PREFETCH_EN | off, &before, &after) == 0 &&
             (after & PL310_DATA_PREFETCH_EN))
             log_line("l2_prefetch: PL310 data prefetch ENABLED");
         else

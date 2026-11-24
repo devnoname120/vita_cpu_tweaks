@@ -67,12 +67,18 @@ move to the next step.
    firmware. The log will be large; that's expected.
 2. **`probe_only=off`, `l2_prefetch=on`**. One secure MMIO write, no code
    execution. Expect `l2_prefetch: PL310 data prefetch ENABLED` and
-   `0x21000000 -> 0x31000000`.
+   `prefetch_ctrl before 0x21000000` / `after 0x3100000F` (data prefetch on,
+   `l2_prefetch_offset=15`).
 3. **also `l1_prefetch=on`**. The involved one: it injects a page-table
-   descriptor to get a secure-executable scratch page, runs a 4-instruction
-   stub on each core, then cleans up after itself. Expect
-   `l1_prefetch: ACTLR stride prefetch ENABLED on all cores` and
+   descriptor to get a secure-executable scratch page, runs a 9-word stub on
+   each core, then cleans up after itself. Expect
+   `actlr: requested bits APPLIED on all cores` and
    `actlr before 0x149 / actlr after 0x14F` four times.
+4. **`bench=on`** (the other keys are ignored in this mode). Boots normally;
+   30 seconds after boot it runs a ~10 second memory benchmark across the
+   prefetch settings, then puts the firmware's settings back. Leave the Vita
+   on the home screen for a minute, then send the log - it ends with
+   `bench done`. This tells us whether the speed-up holds on your unit too.
 
 Every step is gated: if anything about your layout doesn't match what the
 code expects, it logs a reason and aborts instead of guessing. An abort is

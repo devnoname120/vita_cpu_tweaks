@@ -73,6 +73,23 @@ static int parse_tri(const char *val, int vallen)
     return PFE_KEEP;
 }
 
+int pfe_l2_offset_valid(int v)
+{
+    return (v >= 0 && v <= 7) || v == 15 || v == 31;
+}
+
+/* Decimal 0-99, nothing else; -1 if the value is not that. */
+static int parse_small_uint(const char *val, int vallen)
+{
+    if (vallen < 1 || vallen > 2) return -1;
+    int v = 0;
+    for (int i = 0; i < vallen; i++) {
+        if (val[i] < '0' || val[i] > '9') return -1;
+        v = v * 10 + (val[i] - '0');
+    }
+    return v;
+}
+
 void pfe_parse_config(const char *buf, int n, struct pfe_config *out)
 {
     out->want_l1 = 0;
@@ -80,6 +97,7 @@ void pfe_parse_config(const char *buf, int n, struct pfe_config *out)
     out->probe_only = 0;
     out->alloc_one_way = PFE_KEEP;
     out->bench = 0;
+    out->l2_offset = PFE_L2_OFFSET_DEFAULT;
 
     if (!buf || n <= 0) return;
 
@@ -109,6 +127,10 @@ void pfe_parse_config(const char *buf, int n, struct pfe_config *out)
         else if (streq_ci(key, keylen, "l2_prefetch")) out->want_l2 = on;
         else if (streq_ci(key, keylen, "probe_only"))  out->probe_only = on;
         else if (streq_ci(key, keylen, "bench"))       out->bench = on;
+        else if (streq_ci(key, keylen, "l2_prefetch_offset")) {
+            int v = parse_small_uint(val, vallen);
+            out->l2_offset = pfe_l2_offset_valid(v) ? v : PFE_L2_OFFSET_DEFAULT;
+        }
         else if (streq_ci(key, keylen, "actlr_alloc_one_way"))
             out->alloc_one_way = parse_tri(val, vallen);
     }

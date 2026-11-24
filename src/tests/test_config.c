@@ -52,6 +52,18 @@ static void check_bench(const char *name, const char *text, int want)
     }
 }
 
+static void check_off(const char *name, const char *text, int want)
+{
+    struct pfe_config c;
+    pfe_parse_config(text, (int)strlen(text), &c);
+    if (c.l2_offset != want) {
+        printf("FAIL %-44s l2_offset=%d (want %d)\n", name, c.l2_offset, want);
+        failures++;
+    } else {
+        printf("ok   %s\n", name);
+    }
+}
+
 static void check_comment(const char *name, const char *in, const char *want,
                           int want_ret)
 {
@@ -162,6 +174,24 @@ int main(void)
     check_bench("bench: off", "bench=off\n", 0);
     check_bench("bench: commented", "#bench=on\n", 0);
     check_bench("bench: not a prefix match", "benchmark=on\n", 0);
+
+    /* --- l2_prefetch_offset --- */
+    check_off("offset: default", "l2_prefetch=on\n", 15);
+    check_off("offset: empty file", "", 15);
+    check_off("offset: 0", "l2_prefetch_offset=0\n", 0);
+    check_off("offset: 7", "l2_prefetch_offset=7\n", 7);
+    check_off("offset: 31 CRLF", "l2_prefetch_offset=31\r\n", 31);
+    check_off("offset: spaces", "  l2_prefetch_offset = 7 \n", 7);
+    check_off("offset: 23 refused (errata)", "l2_prefetch_offset=23\n", 15);
+    check_off("offset: 8 not a TRM value", "l2_prefetch_offset=8\n", 15);
+    check_off("offset: 32 out of range", "l2_prefetch_offset=32\n", 15);
+    check_off("offset: negative", "l2_prefetch_offset=-1\n", 15);
+    check_off("offset: hex not accepted", "l2_prefetch_offset=0x7\n", 15);
+    check_off("offset: 3 digits", "l2_prefetch_offset=007\n", 15);
+    check_off("offset: garbage", "l2_prefetch_offset=fast\n", 15);
+    check_off("offset: empty value", "l2_prefetch_offset=\n", 15);
+    check_off("offset: commented", "#l2_prefetch_offset=7\n", 15);
+    check_off("offset: l2_prefetch key not confused", "l2_prefetch=7\n", 15);
 
     /* --- dead-man's switch --- */
     check_comment("switch: LF",
