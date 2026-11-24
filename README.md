@@ -41,6 +41,11 @@ three interleaved rounds. Two separate boots agree to a median of 0.05%.
 
 **Strided loads over memory that is in no cache**, cycles per load:
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/stride-dark.svg">
+  <img src="docs/img/stride-light.svg" alt="Cycles per load by stride: stock, ACTLR hint only, PL310 prefetch only, and both">
+</picture>
+
 | stride (bytes) | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 |
 |---|---|---|---|---|---|---|---|---|
 | stock | 16.6 | 29.6 | 35.0 | 47.4 | 47.4 | 47.6 | 48.0 | 49.4 |
@@ -49,8 +54,20 @@ three interleaved rounds. Two separate boots agree to a median of 0.05%.
 | **both, offset 15 (default config)** | **6.6** | **10.0** | **14.0** | **22.7** | **23.3** | **27.7** | **36.6** | **41.0** |
 | change vs stock | −60% | −66% | −60% | −52% | −51% | −42% | −24% | −17% |
 
+Speedup of the default config over stock:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/speedup-dark.svg">
+  <img src="docs/img/speedup-light.svg" alt="Speedup of the default config over stock, 3.0x at stride 8 down to 1.2x at stride 512">
+</picture>
+
 **Choosing the PL310 prefetch offset**: same test, ACTLR hint on, PL310
 data prefetch on:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/offset-dark.svg">
+  <img src="docs/img/offset-light.svg" alt="Cycles per load by stride for prefetch offsets 0, 7, 15 and 31">
+</picture>
 
 | offset | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 |
 |---|---|---|---|---|---|---|---|---|
@@ -62,6 +79,11 @@ data prefetch on:
 **Random (pointer-chasing) access** can't be predicted, but it still gains a
 little. Over a 2 MiB working set, cycles per load drop from 33.8 (stock) to
 31.3 (default config), or 29.8 with offset 0.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/random-dark.svg">
+  <img src="docs/img/random-light.svg" alt="Random-access cycles per load by working set, stock vs default config: identical in L1 and L2, lower at 2 MiB">
+</picture>
 
 What this means:
 
