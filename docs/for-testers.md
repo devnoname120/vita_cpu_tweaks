@@ -52,22 +52,23 @@ running without that safety net.
    ```
 4. Reboot.
 
-## Please go up this ladder, one reboot at a time
+## What it does, and what else you can run
 
-`ur0:data/cpu_tweaks.ini` ships set to step 1. After each boot, read
-`ur0:data/cpu_tweaks.log`, then set the next step's key and reboot.
+`ur0:data/cpu_tweaks.ini` ships with `enable = on`: the settings below are
+applied at every boot. After a boot, read `ur0:data/cpu_tweaks.log`.
 
-1. **`probe = once`** (as shipped). Read-only: dumps your secure page-table
-   layout and makes no secure writes whatsoever. This is the most useful
-   step to send back — it says whether the rest would even work on your
-   firmware. The log will be large; that's expected.
-2. **`enable = once`**. Sets the PL310 fields with one secure MMIO write, and
+1. **`enable = on`** (as shipped). Sets the PL310 fields with one secure MMIO write, and
    the ACTLR bit by injecting a page-table descriptor to get a
    secure-executable scratch page, running a 9-word stub on each core, then
    cleaning up after itself. Expect `actlr before 0x149` / `after 0x14B`
    four times, `actlr: requested bits APPLIED on all cores`,
    `prefetch_ctrl before 0x21000000` / `after 0x3100000F` and
-   `pl310: requested fields APPLIED`.
+   `pl310: requested fields APPLIED`. With `enable = once` instead, it
+   applies them for one boot and switches the line back to `off` first,
+   so a boot that hangs is recovered by power-cycling.
+2. **`probe = once`**. Read-only: dumps your secure page-table layout and
+   makes no secure writes whatsoever. Useful if `enable` aborts on your
+   firmware - it shows why. The log will be large; that's expected.
 3. **`benchmark = once`**. During boot, it raises the clocks to game levels
    (CPU 500 MHz), runs a memory benchmark across the prefetch settings for
    about 40 seconds - the screen stays on the boot logo meanwhile - puts

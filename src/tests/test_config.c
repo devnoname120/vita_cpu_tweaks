@@ -264,8 +264,8 @@ int main(void)
             for (int i = 0; i < n; i++) lines += big[i] == '\n';
             expect("example fits the device buffer even as CRLF",
                    n + lines <= PFE_CONFIG_MAX_BYTES, 1);
-            expect("example: enable off as shipped", c.enable, 0);
-            expect("example: probe off as shipped", c.probe, 0);
+            expect("example: enable on as shipped", c.enable, PFE_RUN_ON);
+            expect("example: probe off as shipped", c.probe, PFE_RUN_OFF);
             expect("example: benchmark off as shipped", c.bench, 0);
             pfe_config_masks(&c, &m);
             expect_hex("example: ACTLR 0x149 -> 0x14B if applied",
@@ -275,7 +275,7 @@ int main(void)
         }
     }
 
-    /* The tester handout's config must parse too, as step 1 (probe once). */
+    /* The tester handout's config must parse too, as shipped (enable on). */
     {
         FILE *f = fopen("docs/for-testers.config.ini", "rb");
         if (!f) f = fopen("../docs/for-testers.config.ini", "rb");
@@ -288,8 +288,8 @@ int main(void)
             fclose(f);
             pfe_parse_config(big, n, &c);
             expect("tester config: every line recognised", c.ignored, 0);
-            expect("tester config: probe once as shipped", c.probe, PFE_RUN_ONCE);
-            expect("tester config: enable off as shipped", c.enable, 0);
+            expect("tester config: probe off as shipped", c.probe, PFE_RUN_OFF);
+            expect("tester config: enable on as shipped", c.enable, PFE_RUN_ON);
             expect("tester config: benchmark off as shipped", c.bench, 0);
             expect("tester config: log on", c.log, 1);
         }
