@@ -648,23 +648,139 @@ static int run_actlr_core(SceSize args, void *argp)
 }
 
 /*
- * Sets ACTLR's prefetch bits on every core, by staging our stub in SYSMEM's
- * secure .text fill and running it through EXEC_WITH_SP.
+ * The non-secure view of the TZ region. Boot 17 established that NS *reads*
+ * of TZ memory work and only writes are firewalled, so the secure page tables
+ * can be walked from non-secure code with no SMC at all. Derived at runtime:
+ * both the secure module bases and psp2spl's NS window move between boots.
+ */
+#define TZ_RST            0x40000000u
+#define TZ_LEN            0x00200000u
+#define SECURE_TTBR0_OFF  0x00108000u  /* psp2spl tzs_offsets.c statics */
+#define SECURE_TTBR1_OFF  0x0010C000u
+
+static unsigned int g_tz_ns_base;      /* NS VA corresponding to PA 0x40000000 */
+
+static int tz_ns_init(unsigned int ref_sva)
+{
+    unsigned int pa = 0;
+    void *nsva = NULL;
+    if (SPLx_TZS_SVA2PA(ref_sva, &pa) < 0) return -1;
+    if (SPLx_TZS_SVA2NSVA(ref_sva, &nsva) < 0) return -2;
+    if (pa < TZ_RST || pa >= TZ_RST + TZ_LEN) return -3;
+    g_tz_ns_base = (unsigned int)nsva - (pa - TZ_RST);
+    return 0;
+}
+
+static unsigned int tz_ns(unsigned int pa)
+{
+    if (!g_tz_ns_base || pa < TZ_RST || pa >= TZ_RST + TZ_LEN) return 0;
+    return g_tz_ns_base + (pa - TZ_RST);
+}
+
+/*
+ * Walks the secure tables for sva, returning where its L2 descriptor lives
+ * (as a physical address) and the descriptor's current value. Tries both
+ * TTBRs, the way psp2spl's own SVA2PA does.
+ */
+static int ns_walk(unsigned int sva, unsigned int *out_desc_pa, unsigned int *out_desc)
+{
+    static const unsigned int ttbr_off[2] = { SECURE_TTBR0_OFF, SECURE_TTBR1_OFF };
+    for (int t = 0; t < 2; t++) {
+        unsigned int l1 = tz_ns(TZ_RST + ttbr_off[t]);
+        if (!l1) continue;
+        unsigned int l1d = ((volatile unsigned int *)l1)[sva >> 20];
+        if ((l1d & 3u) != 1u) continue;             /* want a coarse page table */
+        unsigned int l2_pa = l1d & 0xFFFFFC00u;
+        unsigned int l2 = tz_ns(l2_pa);
+        if (!l2) continue;
+        unsigned int idx = (sva >> 12) & 0xFFu;
+        *out_desc_pa = l2_pa + idx * 4u;
+        *out_desc    = ((volatile unsigned int *)l2)[idx];
+        return 0;
+    }
+    return -1;
+}
+
+#define DESC_IS_SMALL(d) (((d) & 2u) == 2u)
+#define DESC_PL1_RW(d)   ((((d) >> 9) & 1u) == 0u && (((d) >> 4) & 3u) == 1u)
+
+/*
+ * Small-page descriptor, Normal Non-Cacheable, PL1 read/write, executable:
+ * bit1=1 small page, AP[1:0]=0b01 (bits 5:4), TEX=0b001 (bits 8:6), C=B=0,
+ * AP[2]=0 (bit 9), S=0, nG=0, XN=0 (bit 0).
+ */
+#define DESC_NC_RWX(pa)  (((pa) & 0xFFFFF000u) | 0x52u)
+
+/* Scratch physical page for the stub. Must be inside the TZ region, because
+ * the DDR firewall confines secure DRAM access to it. 0x401E3000 sits in a
+ * gap between two mapped secure pages (0x401E2000 / 0x401E4000), so it is
+ * real secure-accessible DRAM that nothing maps. Re-verified at runtime. */
+#define TZ_SCRATCH_PA    0x401E3000u
+
+/*
+ * Is any secure mapping, in either TTBR, backed by this physical page? Used
+ * to confirm the scratch page really is free before we write to it - getting
+ * this wrong would clobber live secure memory. Plain reads through the NS
+ * window, no SMCs.
+ */
+static int tz_pa_is_mapped(unsigned int pa)
+{
+    static const unsigned int ttbr_off[2] = { SECURE_TTBR0_OFF, SECURE_TTBR1_OFF };
+    unsigned int page = pa & 0xFFFFF000u;
+    for (int t = 0; t < 2; t++) {
+        unsigned int l1 = tz_ns(TZ_RST + ttbr_off[t]);
+        if (!l1) continue;
+        for (unsigned int i = 0; i < 4096u; i++) {
+            unsigned int l1d = ((volatile unsigned int *)l1)[i];
+            unsigned int type = l1d & 3u;
+            if (type == 2u) {
+                if (l1d & (1u << 18)) {                      /* supersection, 16 MiB */
+                    if ((l1d & 0xFF000000u) == (page & 0xFF000000u)) return 1;
+                } else if ((l1d & 0xFFF00000u) == (page & 0xFFF00000u)) {
+                    return 1;                                 /* section, 1 MiB */
+                }
+            } else if (type == 1u) {
+                unsigned int l2 = tz_ns(l1d & 0xFFFFFC00u);
+                if (!l2) continue;
+                for (unsigned int j = 0; j < 256u; j++) {
+                    unsigned int d = ((volatile unsigned int *)l2)[j];
+                    unsigned int dt = d & 3u;
+                    if (dt == 0u) continue;
+                    if (dt == 1u) {                           /* large page, 64 KiB */
+                        if ((d & 0xFFFF0000u) == (page & 0xFFFF0000u)) return 1;
+                    } else if ((d & 0xFFFFF000u) == page) {   /* small page */
+                        return 1;
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+/*
+ * Sets ACTLR's prefetch bits on every core.
  *
- * Why this shape (see analysis/ebadmovp-investigation/README.md): secure world
- * has no page that is both writable and executable, and no mapping of our own
- * code's PA, so the stub cannot simply be allocated and pointed at. But AP/XN
- * are per-translation-table, not per-physical-page: SYSMEM's .text is secure
- * R-X, and a second *non-secure* mapping of the same physical page is writable.
- * Write through the NS alias, clean to PoU, execute via the secure VA.
+ * Staging the stub inside SYSMEM's secure .text is a dead end on retail 3.60:
+ * the only way to write that page from non-secure code is an aliased mapping,
+ * and the DDR firewall drops those writes before they reach DRAM (boot 17,
+ * confirmed via lv0). Secure writes are not firewalled, though - psp2spl uses
+ * them for its own SMC table - so instead of writing into secure memory we
+ * give secure world a mapping of *our own* page, which lives outside the TZ
+ * region and so is trivially writable from here.
  *
- * Two gates keep a mistake from hanging the machine the way boot 8 did:
- *   - the target must still be all-0xB6 fill, read back through secure world,
- *     or we never write (protects live secure code if the layout moved);
- *   - after writing, secure world must actually read back our instructions,
- *     or we never execute (protects against a cache-coherency failure, which
- *     would otherwise mean secure world executing stale 0xB6 as code).
- * Either gate failing is a clean logged abort.
+ * One secure write adds an L2 descriptor for a previously unmapped secure VA,
+ * copying the attributes of SYSMEM .text's own R-X descriptor and swapping in
+ * our page's PA. A previously-invalid VA also means no stale TLB entry to
+ * worry about. The descriptor is removed again afterwards.
+ *
+ * Gates, so a wrong guess aborts instead of hanging the way boot 8 did:
+ *   - the R-X template descriptor must agree with SVA2PA;
+ *   - the target slot must currently be unmapped;
+ *   - the secure VA chosen for the descriptor must map the right page and be
+ *     PL1-RW, cross-checked by a secure read before any write;
+ *   - after the write, secure world must read our instructions back through
+ *     the new mapping, or we never execute it.
  */
 static void apply_l1_actlr(void)
 {
@@ -673,126 +789,134 @@ static void apply_l1_actlr(void)
         log_line("l1: GETMODSVA(SYSMEM,.text) failed");
         return;
     }
-    unsigned int stub_sva = text_sva + SYSMEM_STUB_OFF;
-    unsigned int stub_pa  = 0;
-    if (SPLx_TZS_SVA2PA(stub_sva, &stub_pa) < 0) {
-        log_line("l1: SVA2PA(stub) failed");
+    if (tz_ns_init(text_sva) < 0) {
+        log_line("l1: could not derive the NS view of the TZ region");
         return;
     }
-    log_hex_line("l1 stub sva ", stub_sva);
-    log_hex_line("l1 stub pa  ", stub_pa);
+    log_hex_line("l1 tz ns base ", g_tz_ns_base);
 
-    /* Writable non-secure alias of the same physical page. */
-    unsigned int page_pa  = stub_pa & ~0xFFFu;
-    unsigned int page_off = stub_pa &  0xFFFu;
-    SceKernelAllocMemBlockKernelOpt opt;
-    memset(&opt, 0, sizeof(opt));
-    opt.size  = (unsigned int)sizeof(opt);
-    opt.attr  = SCE_KERNEL_ALLOC_MEMBLOCK_ATTR_HAS_PADDR;
-    opt.paddr = page_pa;
-    SceUID blk = ksceKernelAllocMemBlock("pfe_stub", SCE_KERNEL_MEMBLOCK_TYPE_KERNEL_RW,
-                                         0x1000, &opt);
-    if (blk < 0) {
-        log_hex_line("l1: NS alias map failed ", (unsigned int)blk);
+    /*
+     * The stub's bytes have to live at a TZ physical address. Boot 20 settled
+     * that: a secure read through an injected mapping of our own out-of-TZ
+     * page returns a constant sentinel (0x1F85C021) no matter which page we
+     * point it at, while the same mapping pointed at an in-TZ PA reads back
+     * that page's real contents. So the firewall confines secure DRAM access
+     * to the TZ region in both directions, and staging the stub in our own
+     * memory cannot work however the caches are maintained.
+     */
+    if (tz_pa_is_mapped(TZ_SCRATCH_PA)) {
+        log_line("l1: scratch PA is already mapped by secure world - aborting");
         return;
     }
-    void *ns_base = NULL;
-    ksceKernelGetMemBlockBase(blk, &ns_base);
-    unsigned int ns_stub = (unsigned int)ns_base + page_off;
-    log_hex_line("l1 ns alias ", ns_stub);
+    log_hex_line("l1 scratch pa (verified unmapped) ", TZ_SCRATCH_PA);
+
+    /* Attribute template: SYSMEM .text's last page is secure R-X. Read only to
+     * cross-check that our table walk agrees with psp2spl's own SVA2PA. */
+    unsigned int rx_desc_pa = 0, rx_desc = 0;
+    if (ns_walk(text_sva + 0x14000u, &rx_desc_pa, &rx_desc) < 0 || !DESC_IS_SMALL(rx_desc)) {
+        log_line("l1: could not read the R-X template descriptor");
+        return;
+    }
+    unsigned int tpa = 0;
+    if (SPLx_TZS_SVA2PA(text_sva + 0x14000u, &tpa) < 0 ||
+        (rx_desc & 0xFFFFF000u) != (tpa & 0xFFFFF000u)) {
+        log_line("l1: template descriptor disagrees with SVA2PA - aborting");
+        return;
+    }
+    log_hex_line("l1 rx template desc ", rx_desc);
+
+    /* First unmapped slot past .text, within the same 1 MiB L2 table. */
+    unsigned int target_sva = 0, tgt_desc_pa = 0, tgt_desc = 0;
+    for (unsigned int off = 0x15000u; off <= 0x1F000u; off += 0x1000u) {
+        unsigned int dpa = 0, d = 0;
+        if (ns_walk(text_sva + off, &dpa, &d) < 0) continue;
+        if (d != 0) continue;
+        target_sva = text_sva + off; tgt_desc_pa = dpa; tgt_desc = d;
+        break;
+    }
+    if (!target_sva) {
+        log_line("l1: no free slot in SYSMEM's L2 table - aborting");
+        return;
+    }
+    log_hex_line("l1 target sva ", target_sva);
+    log_hex_line("l1 target desc pa ", tgt_desc_pa);
+
+    /* The descriptor must be written with a *secure* write, so find a secure
+     * VA that maps the L2 table's page and is PL1-RW. */
+    unsigned int desc_sva = 0;
+    for (unsigned int cand = 0x1000u; cand < 0x00200000u; cand += 0x1000u) {
+        if (cand >= text_sva && cand < text_sva + 0x20000u) continue;
+        unsigned int dpa = 0, d = 0;
+        if (ns_walk(cand, &dpa, &d) < 0) continue;
+        if (!DESC_IS_SMALL(d) || !DESC_PL1_RW(d)) continue;
+        if ((d & 0xFFFFF000u) != (tgt_desc_pa & ~0xFFFu)) continue;
+        desc_sva = cand + (tgt_desc_pa & 0xFFFu);
+        break;
+    }
+    if (!desc_sva) {
+        log_line("l1: no writable secure VA maps the L2 table - aborting");
+        return;
+    }
+    log_hex_line("l1 desc sva ", desc_sva);
+
+    unsigned int sr = 0;
+    if (SPLx_TZS_READ32(desc_sva, &sr) < 0 || sr != tgt_desc) {
+        log_hex_line("l1: desc_sva cross-check failed, secure read ", sr);
+        return;
+    }
 
     /*
-     * Gate 1, through the NS alias rather than a secure read. Boot 14 showed
-     * the alias is a faithful view of the same physical page (it read the same
-     * 0xB6 fill), and reading it here avoids pulling the *old* bytes into the
-     * secure side's own cache moments before we overwrite them - which is what
-     * made boot 13/14's secure read-back keep returning stale fill.
+     * Map the scratch page Normal Non-Cacheable, PL1-RW and executable.
+     * Non-cacheable is the point: the secure writes below then go straight to
+     * DRAM and the instruction fetch reads DRAM, so the A9/PL310
+     * security-tagged-line problem that defeated boots 13-19 cannot arise, and
+     * no cp15 maintenance is needed at all. Nothing else maps this page, so no
+     * alias can be holding a stale line for it either.
      */
-    for (unsigned int i = 0; i < sizeof(actlr_set) / 4; i++) {
-        unsigned int v = ((volatile unsigned int *)ns_stub)[i];
-        if (v != 0xB6B6B6B6u) {
-            log_hex_line("l1: stub slot is NOT fill, aborting; found ", v);
-            ksceKernelFreeMemBlock(blk);
-            return;
-        }
-    }
-    log_line("l1: stub slot verified as 0xB6 fill (via NS alias)");
+    unsigned int new_desc = DESC_NC_RWX(TZ_SCRATCH_PA);
+    log_hex_line("l1 new desc ", new_desc);
+    int wr = SPLx_TZS_WRITE32(desc_sva, new_desc);
+    log_hex_line("l1 desc write ret ", (unsigned int)wr);
+    unsigned int vr = 0;
+    SPLx_TZS_READ32(desc_sva, &vr);
+    log_hex_line("l1 desc readback ", vr);
 
-    for (unsigned int i = 0; i < sizeof(actlr_set) / 4; i++)
-        ((volatile unsigned int *)ns_stub)[i] = actlr_set[i];
+    int visible = (vr == new_desc);
+    if (!visible)
+        log_line("l1: descriptor did not take - not writing the stub");
 
-    /* Clean the D-cache for the line, then invalidate I-cache and branch
-     * predictor, so a secure-side I-fetch of the same physical line sees the
-     * new bytes. Clean to PoC as well as PoU: PL310 sits between the two, and
-     * the secure read gadget need not share our inner-cache view. 16 bytes at
-     * a 32-byte aligned slot is a single line, so one pass each. */
-    __asm__ __volatile__("mcr p15, 0, %0, c7, c11, 1" :: "r"(ns_stub)); /* DCCMVAU  -> PoU */
-    __asm__ __volatile__("dsb");
-    __asm__ __volatile__("mcr p15, 0, %0, c7, c10, 1" :: "r"(ns_stub)); /* DCCMVAC  -> PoC */
-    __asm__ __volatile__("dsb");
-    __asm__ __volatile__("mcr p15, 0, %0, c7, c14, 1" :: "r"(ns_stub)); /* DCCIMVAC -> PoC */
-    __asm__ __volatile__("dsb");
-    __asm__ __volatile__("mcr p15, 0, %0, c7, c5, 1"  :: "r"(ns_stub)); /* ICIMVAU */
-    __asm__ __volatile__("mcr p15, 0, %0, c7, c5, 6"  :: "r"(ns_stub)); /* BPIMVA  */
-    __asm__ __volatile__("dsb");
-    __asm__ __volatile__("isb");
-
-    log_hex_line("l1 ns reads after write  ", ((volatile unsigned int *)ns_stub)[0]);
-
-    /*
-     * Did the write actually reach DRAM? lv0/F00D is a different bus
-     * initiator with its own path to physical memory, so reading the same PA
-     * through it separates the two candidate explanations for boots 13-15:
-     * if lv0 sees our instruction, DRAM holds it and the secure side is
-     * reading a stale cached copy; if lv0 still sees 0xB6, the NS write never
-     * landed and the DDR firewall is dropping it (its sibling entries are
-     * still armed - see probe_ddr_firewall()).
-     */
-    {
-        int lv0_val = 0;
-        int lr = SPLx_LV0_READ32(stub_pa, &lv0_val, SPLV0_COMMBACKUP_NEVER);
-        log_hex_line("l1 lv0 read ret ", (unsigned int)lr);
-        log_hex_line("l1 lv0 sees     ", (unsigned int)lv0_val);
-    }
-
-    /* Drop any secure-tagged PL310 line for this address, which our NS-side
-     * maintenance cannot reach. Issued through the secure write primitive
-     * since PL310 is mapped secure-RW. */
-    int pm = SPLx_TZS_WRITE32(PL310_CLEAN_INV_PA_SVA, stub_pa);
-    log_hex_line("l1 pl310 clean_inv_pa ret ", (unsigned int)pm);
-    for (int spin = 0; spin < 1000; spin++) {
-        unsigned int st = 0;
-        if (SPLx_TZS_READ32(PL310_CLEAN_INV_PA_SVA, &st) < 0) break;
-        if (!(st & 1u)) break;
-    }
-
-    /* Gate 2: secure world must see the stub, or we do not execute it. */
-    int visible = 1;
-    for (unsigned int i = 0; i < sizeof(actlr_set) / 4; i++) {
-        unsigned int v = 0;
-        if (SPLx_TZS_READ32(stub_sva + i * 4, &v) < 0 || v != actlr_set[i]) {
-            log_hex_line("l1: secure readback mismatch at word ", i);
-            log_hex_line("     got ", v);
-            visible = 0;
-            break;
+    /* Write the stub itself with secure writes, which the firewall permits. */
+    if (visible) {
+        for (unsigned int i = 0; i < sizeof(actlr_set) / 4; i++) {
+            if (SPLx_TZS_WRITE32(target_sva + i * 4u, actlr_set[i]) < 0) {
+                log_hex_line("l1: secure stub write failed at word ", i);
+                visible = 0;
+                break;
+            }
         }
     }
 
     if (visible) {
-        log_line("l1: stub visible from secure world, executing per core");
-        flush_log_to_disk();
+        for (unsigned int i = 0; i < sizeof(actlr_set) / 4; i++) {
+            unsigned int v = 0;
+            if (SPLx_TZS_READ32(target_sva + i * 4u, &v) < 0 || v != actlr_set[i]) {
+                log_hex_line("l1: stub not visible through new mapping, word ", i);
+                log_hex_line("     got ", v);
+                visible = 0;
+                break;
+            }
+        }
+    }
 
-        /* The stub is MRC/ORR/MCR/BX lr - it touches no memory, so the sp
-         * handed to the trampoline is never dereferenced. Use INTRMGR's .data
-         * (what psp2spl itself borrows for its own init) rather than SYSMEM's,
-         * which no longer resolves now that its DATAMP is 0. */
+    if (visible) {
+        log_line("l1: stub visible through the new secure mapping, executing per core");
+        flush_log_to_disk();
         unsigned int stack_sva = 0;
         if (SPLx_TZS_GETMODSVA(SPLTZ_MODINFO_INTRMGR, 1, 0, &stack_sva) >= 0 && stack_sva) {
             stack_sva += 0x200u;
             log_hex_line("l1 scratch sp ", stack_sva);
-
             static const int masks[4] = { 0x10000, 0x20000, 0x40000, 0x80000 };
-            unsigned int argp[2] = { stub_sva, stack_sva };
+            unsigned int argp[2] = { target_sva, stack_sva };
             for (int i = 0; i < 4; i++) {
                 SceUID th = ksceKernelCreateThread("pfe_actlr", run_actlr_core,
                                                    0x10, 0x2000, 0, masks[i], NULL);
@@ -809,16 +933,11 @@ static void apply_l1_actlr(void)
         log_line("l1: stub NOT visible from secure world - NOT executing (clean abort)");
     }
 
-    /* Leave SYSMEM's .text as we found it. */
+    /* Zero the stub out of the scratch page, then drop the mapping again. */
     for (unsigned int i = 0; i < sizeof(actlr_set) / 4; i++)
-        ((volatile unsigned int *)ns_stub)[i] = 0xB6B6B6B6u;
-    __asm__ __volatile__("mcr p15, 0, %0, c7, c11, 1" :: "r"(ns_stub));
-    __asm__ __volatile__("dsb");
-    __asm__ __volatile__("mcr p15, 0, %0, c7, c5, 1"  :: "r"(ns_stub));
-    __asm__ __volatile__("dsb");
-    __asm__ __volatile__("isb");
-    ksceKernelFreeMemBlock(blk);
-    log_line("l1: fill restored, NS alias released");
+        SPLx_TZS_WRITE32(target_sva + i * 4u, 0);
+    SPLx_TZS_WRITE32(desc_sva, tgt_desc);
+    log_line("l1: scratch cleared, secure mapping removed");
 }
 
 int module_start(SceSize argc, const void *args)

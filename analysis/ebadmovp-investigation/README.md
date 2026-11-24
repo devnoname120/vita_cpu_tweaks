@@ -49,7 +49,25 @@ That splits the two knobs:
   `PREFETCH_CTRL` (`0x1A002F60`) bit 28 with `SPLx_TZS_WRITE32`. Boot 11:
   `0x21000000 -> 0x31000000`, read-back confirms, "data prefetch ENABLED",
   clean boot. This is what the plugin now does.
-* **L1 / ACTLR - BLOCKED, and the devkit's technique is ruled out on retail.**
+* **L1 / ACTLR - SOLVED (boot 21).** ACTLR `0x149 -> 0x14F` on all four cores,
+  same result the 3.65 devkit got, in the same boot that enables L2. The
+  mechanism is *not* the devkit's: inject one L2 descriptor mapping a
+  previously-unmapped secure VA to an unused **in-TZ** physical page
+  (`0x401E3000`, in the gap between `0x401E2000` and `0x401E4000`) as
+  **Normal Non-Cacheable, PL1-RW, executable** (`desc = pa | 0x52`), write the
+  stub there with `SPLx_TZS_WRITE32`, `EXEC_WITH_SP` it per core, then clear
+  the scratch and remove the descriptor. That one choice of attributes defeats
+  every wall found below at once: the PA is in-TZ so the firewall permits it,
+  the writes are *secure* so the firewall permits them, non-cacheable means no
+  cp15 maintenance is needed and the PL310 security-tagged-line problem cannot
+  arise, and a VA that was invalid before cannot have a stale TLB entry. The
+  scratch page is re-verified unmapped at runtime (`tz_pa_is_mapped()`) before
+  anything is written, and every address is derived per boot - SYSMEM's `.text`
+  moved between `0x000E0000`, `0x00200000` and `0x00210000` across these tests.
+
+  The rest of this bullet is the record of how the dead ends were eliminated.
+
+* **L1 / ACTLR - the dead ends, and why the devkit's technique does not port.**
   ACTLR is a cp15 register, settable only by an `MCR` in secure PL1, per core.
   A non-secure PL1 `MCR` does not work (boot 10 wedged the probe thread), so
   it has to run in secure world via `EXEC_WITH_SP`, which needs a
