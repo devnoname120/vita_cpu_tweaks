@@ -43,25 +43,6 @@ static int ignored_of(const char *t) { struct pfe_config c; parse(t, &c); return
 static int offset_of(const char *t)  { struct pfe_config c; parse(t, &c); return c.pl310_offset; }
 static int dside_of(const char *t)   { struct pfe_config c; parse(t, &c); return c.actlr[0]; }
 
-static void check_comment(const char *name, const char *in, const char *want,
-                          int want_ret)
-{
-    char buf[512];
-    int n = (int)strlen(in);
-    memcpy(buf, in, (size_t)n);
-    int ret = pfe_comment_out_lines(buf, &n, (int)sizeof(buf),
-                                    "cpu_tweaks.skprx");
-    int wn = (int)strlen(want);
-    if (ret != want_ret || n != wn || memcmp(buf, want, (size_t)wn) != 0) {
-        printf("FAIL %-48s ret=%d (want %d)\n", name, ret, want_ret);
-        printf("       got  <%.*s>\n", n, buf);
-        printf("       want <%s>\n", want);
-        failures++;
-    } else {
-        printf("ok   %s\n", name);
-    }
-}
-
 int main(void)
 {
     struct pfe_config c;
@@ -72,7 +53,6 @@ int main(void)
     expect("default enable off", c.enable, 0);
     expect("default probe off", c.probe, 0);
     expect("default bench off", c.bench, 0);
-    expect("default self_disable on", c.self_disable, 1);
     expect("default offset keep", c.pl310_offset, -1);
     expect("default benchmark.clocks max", c.bench_clocks_max, 1);
     pfe_config_masks(&c, &m);
@@ -106,7 +86,15 @@ int main(void)
     expect("enable garbage counted", ignored_of("enable=yes\n"), 1);
     expect("enable garbage keeps earlier value", enable_of("enable=on\nenable=1\n"), 1);
     expect("enable last wins", enable_of("enable=on\nenable=off\n"), 0);
-    { struct pfe_config t; parse("probe=on\n", &t); expect("probe on", t.probe, 1); }
+    expect("enable on", enable_of("enable = on\n"), PFE_RUN_ON);
+    expect("enable once", enable_of("enable = once\r\n"), PFE_RUN_ONCE);
+    expect("enable ONCE", enable_of("ENABLE = ONCE\n"), PFE_RUN_ONCE);
+    expect("enable off", enable_of("enable = off\n"), PFE_RUN_OFF);
+    { struct pfe_config t; parse("probe = once\n", &t); expect("probe once", t.probe, PFE_RUN_ONCE); }
+    { struct pfe_config t; parse("probe = off\n", &t);  expect("probe off", t.probe, PFE_RUN_OFF); }
+    { struct pfe_config t; parse("probe = on\n", &t);   expect("probe on is not a value", t.probe, PFE_RUN_OFF); }
+    expect("probe on counted as ignored", ignored_of("probe = on\n"), 1);
+    expect("old key self_disable ignored", ignored_of("self_disable = no\n"), 1);
     expect("benchmark once", bench_of("benchmark = once\r\n"), 1);
     expect("benchmark ONCE", bench_of("BENCHMARK = ONCE\n"), 1);
     expect("benchmark off", bench_of("benchmark = off\n"), 0);
@@ -119,13 +107,12 @@ int main(void)
     expect("old keys counted as ignored",
            ignored_of("probe_only=on\nl1_prefetch=on\nl2_prefetch=on\n"), 3);
 
-    /* --- self_disable: only an explicit no turns the switch off --- */
-    parse("self_disable=no\n", &c);      expect("self_disable=no", c.self_disable, 0);
-    parse("self_disable=NO\r\n", &c);   expect("self_disable=NO CRLF", c.self_disable, 0);
-    parse("self_disable=yes\n", &c);     expect("self_disable=yes", c.self_disable, 1);
-    parse("self_disable=off\n", &c);     expect("self_disable=off is not no", c.self_disable, 1);
-    parse("self_disable=0\n", &c);       expect("self_disable=0 is not no", c.self_disable, 1);
-    parse("#self_disable=no\n", &c);     expect("self_disable commented", c.self_disable, 1);
+    /* --- has_once --- */
+    parse("enable = on\n", &c);       expect("has_once: on is not once", pfe_config_has_once(&c), 0);
+    parse("enable = once\n", &c);     expect("has_once: enable once", pfe_config_has_once(&c), 1);
+    parse("probe = once\n", &c);      expect("has_once: probe once", pfe_config_has_once(&c), 1);
+    parse("benchmark = once\n", &c);  expect("has_once: benchmark once", pfe_config_has_once(&c), 1);
+    parse("", &c);                    expect("has_once: empty", pfe_config_has_once(&c), 0);
 
     /* --- tri-states: keep must differ from off --- */
     expect("tri on", dside_of("actlr.l1_dside_prefetch=on\n"), PFE_ON);
@@ -202,30 +189,34 @@ int main(void)
     parse("benchmark.timing=now\n", &c);   expect("benchmark.timing garbage => home", c.bench_at_boot, 0);
     expect("benchmark.timing garbage counted", ignored_of("benchmark.timing=now\n"), 1);
 
-    /* --- benchmark = once becomes benchmark = off --- */
+    /* --- "once" becomes "off": enable, probe and benchmark --- */
     {
         static const struct { const char *name, *in, *want; int ret; } t[] = {
-            { "once: plain", "benchmark=once\n", "benchmark=off\n", 1 },
+            { "once: benchmark", "benchmark=once\n", "benchmark=off\n", 1 },
+            { "once: enable", "enable = once\n", "enable = off\n", 1 },
+            { "once: probe", "probe = once\n", "probe = off\n", 1 },
             { "once: spacing and comment kept",
-              "benchmark = once    # once | off\r\n",
-              "benchmark = off    # once | off\r\n", 1 },
+              "enable = once    # off | on | once\r\n",
+              "enable = off    # off | on | once\r\n", 1 },
             { "once: uppercase", "BENCHMARK = ONCE\n", "BENCHMARK = off\n", 1 },
-            { "once: BOM, no newline", "\xEF\xBB\xBF" "benchmark=once",
-              "\xEF\xBB\xBF" "benchmark=off", 1 },
-            { "once: commented line untouched", "#benchmark = once\n", "#benchmark = once\n", 0 },
-            { "once: already off", "benchmark = off\n", "benchmark = off\n", 0 },
-            { "once: enable and sub-keys untouched",
-              "enable = on\nbenchmark.timing = boot\nbenchmark = once\nbenchmark.clocks = max\n",
-              "enable = on\nbenchmark.timing = boot\nbenchmark = off\nbenchmark.clocks = max\n", 1 },
-            { "once: two lines",
-              "benchmark=once\r\nbenchmark=once\r\n", "benchmark=off\r\nbenchmark=off\r\n", 2 },
-            { "once: bare CR", "a=1\rbenchmark=once\rb=2\r", "a=1\rbenchmark=off\rb=2\r", 1 },
+            { "once: BOM, no newline", "\xEF\xBB\xBF" "enable=once",
+              "\xEF\xBB\xBF" "enable=off", 1 },
+            { "once: commented line untouched", "#enable = once\n", "#enable = once\n", 0 },
+            { "once: on untouched", "enable = on\n", "enable = on\n", 0 },
+            { "once: all three, others untouched",
+              "enable = once\nprobe = once\nlog = on\nbenchmark.timing = boot\nbenchmark = once\nbenchmark.clocks = max\n",
+              "enable = off\nprobe = off\nlog = on\nbenchmark.timing = boot\nbenchmark = off\nbenchmark.clocks = max\n", 3 },
+            { "once: other key with value once untouched",
+              "x = once\nbenchmark.timing = once\n", "x = once\nbenchmark.timing = once\n", 0 },
+            { "once: two lines CRLF",
+              "enable=once\r\nbenchmark=once\r\n", "enable=off\r\nbenchmark=off\r\n", 2 },
+            { "once: bare CR", "a=1\rprobe=once\rb=2\r", "a=1\rprobe=off\rb=2\r", 1 },
         };
         for (unsigned i = 0; i < sizeof(t) / sizeof(t[0]); i++) {
             char b[256];
             int n = (int)strlen(t[i].in);
             memcpy(b, t[i].in, (size_t)n);
-            int r = pfe_config_disable_bench(b, &n);
+            int r = pfe_config_consume_once(b, &n);
             int ok = r == t[i].ret && n == (int)strlen(t[i].want) &&
                      memcmp(b, t[i].want, (size_t)n) == 0;
             if (!ok) {
@@ -235,15 +226,20 @@ int main(void)
                 printf("ok   %s\n", t[i].name);
             }
         }
-        /* Afterwards the parser sees the benchmark off and enable untouched. */
-        char b[128] = "enable = on\r\nbenchmark = once  # x\r\nbenchmark.timing = boot\r\n";
+        /* Afterwards nothing says once, and "on" settings are untouched. */
+        char b[160] = "enable = once  # x\r\nprobe = once\r\nbenchmark = once\r\nbenchmark.timing = boot\r\n";
         int n = (int)strlen(b);
-        pfe_config_disable_bench(b, &n);
+        pfe_config_consume_once(b, &n);
         pfe_parse_config(b, n, &c);
-        expect("once: benchmark off afterwards", c.bench, 0);
-        expect("once: enable still on", c.enable, 1);
+        expect("once: nothing once afterwards", pfe_config_has_once(&c), 0);
+        expect("once: enable off afterwards", c.enable, PFE_RUN_OFF);
         expect("once: timing kept", c.bench_at_boot, 1);
         expect("once: nothing ignored", c.ignored, 0);
+        char b2[64] = "enable = on\nbenchmark = once\n";
+        n = (int)strlen(b2);
+        pfe_config_consume_once(b2, &n);
+        pfe_parse_config(b2, n, &c);
+        expect("once: enable = on survives a benchmark", c.enable, PFE_RUN_ON);
     }
 
     /* --- unknown lines are counted, never acted on --- */
@@ -271,7 +267,6 @@ int main(void)
             expect("example: enable off as shipped", c.enable, 0);
             expect("example: probe off as shipped", c.probe, 0);
             expect("example: benchmark off as shipped", c.bench, 0);
-            expect("example: self_disable on", c.self_disable, 1);
             pfe_config_masks(&c, &m);
             expect_hex("example: ACTLR 0x149 -> 0x14B if applied",
                        (0x149u & ~m.actlr_clear) | m.actlr_set, 0x14B);
@@ -280,7 +275,7 @@ int main(void)
         }
     }
 
-    /* The tester handout's config must parse too, as step 1 (probe only). */
+    /* The tester handout's config must parse too, as step 1 (probe once). */
     {
         FILE *f = fopen("docs/for-testers.config.ini", "rb");
         if (!f) f = fopen("../docs/for-testers.config.ini", "rb");
@@ -293,10 +288,9 @@ int main(void)
             fclose(f);
             pfe_parse_config(big, n, &c);
             expect("tester config: every line recognised", c.ignored, 0);
-            expect("tester config: probe on as shipped", c.probe, 1);
+            expect("tester config: probe once as shipped", c.probe, PFE_RUN_ONCE);
             expect("tester config: enable off as shipped", c.enable, 0);
             expect("tester config: benchmark off as shipped", c.bench, 0);
-            expect("tester config: self_disable on", c.self_disable, 1);
             expect("tester config: log on", c.log, 1);
         }
     }
@@ -350,53 +344,6 @@ int main(void)
         }
         if (f1) fclose(f1);
         if (f2) fclose(f2);
-    }
-
-    /* --- dead-man's switch --- */
-    check_comment("switch: LF",
-                  "*KERNEL\nur0:tai/cpu_tweaks.skprx\n",
-                  "*KERNEL\n#ur0:tai/cpu_tweaks.skprx\n", 1);
-    check_comment("switch: CRLF preserved",
-                  "*KERNEL\r\nur0:tai/cpu_tweaks.skprx\r\n",
-                  "*KERNEL\r\n#ur0:tai/cpu_tweaks.skprx\r\n", 1);
-    check_comment("switch: bare CR",
-                  "*KERNEL\rur0:tai/cpu_tweaks.skprx\r",
-                  "*KERNEL\r#ur0:tai/cpu_tweaks.skprx\r", 1);
-    check_comment("switch: no trailing newline",
-                  "*KERNEL\r\nur0:tai/cpu_tweaks.skprx",
-                  "*KERNEL\r\n#ur0:tai/cpu_tweaks.skprx", 1);
-    check_comment("switch: already commented is left alone",
-                  "#ur0:tai/cpu_tweaks.skprx\n",
-                  "#ur0:tai/cpu_tweaks.skprx\n", 0);
-    check_comment("switch: indentation preserved",
-                  "  ur0:tai/cpu_tweaks.skprx\n",
-                  "#  ur0:tai/cpu_tweaks.skprx\n", 1);
-    check_comment("switch: absent",
-                  "*KERNEL\nur0:tai/other.skprx\n",
-                  "*KERNEL\nur0:tai/other.skprx\n", 0);
-    check_comment("switch: two copies, both commented",
-                  "ur0:tai/cpu_tweaks.skprx\nux0:tai/cpu_tweaks.skprx\n",
-                  "#ur0:tai/cpu_tweaks.skprx\n#ux0:tai/cpu_tweaks.skprx\n",
-                  2);
-    check_comment("switch: other plugins untouched",
-                  "*KERNEL\na.skprx\nur0:tai/cpu_tweaks.skprx\nb.skprx\n",
-                  "*KERNEL\na.skprx\n#ur0:tai/cpu_tweaks.skprx\nb.skprx\n", 1);
-
-    /* No room for the '#': must refuse and change nothing. */
-    {
-        char tight[64];
-        const char *in = "ur0:tai/cpu_tweaks.skprx";
-        const int len = (int)strlen(in);
-        int n = len;
-        memcpy(tight, in, (size_t)n);
-        /* cap == current length: no room for the extra '#' */
-        int ret = pfe_comment_out_lines(tight, &n, len, "cpu_tweaks.skprx");
-        if (ret != -1 || n != len || memcmp(tight, in, (size_t)len) != 0) {
-            printf("FAIL %-44s ret=%d n=%d\n", "switch: refuses when full", ret, n);
-            failures++;
-        } else {
-            printf("ok   switch: refuses when full, leaves buffer intact\n");
-        }
     }
 
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "all passed",

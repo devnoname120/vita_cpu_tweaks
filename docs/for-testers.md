@@ -20,27 +20,27 @@ works on yours.
   that provides the secure-world access; outside that range it won't even
   try.
 
-## This plugin disables itself every boot, on purpose
+## Every test step switches itself off, on purpose
 
-The very first thing it does — before touching anything else — is comment
-out its own line in `ur0:tai/config.txt`. So:
+Each step below uses a `... = once` setting. The very first thing the
+plugin does with it, before touching anything else, is rewrite that line in
+its own `ur0:data/cpu_tweaks.ini` to `... = off`. So:
 
-- Each run takes effect for **that boot only**, and the plugin is disabled
-  for the next one.
-- If a boot ever hangs, just **power-cycle**: the plugin is already
-  disabled, so the unit comes back normally. You don't need to pull the SD
+- Each step takes effect for **that boot only**.
+- If a boot ever hangs, just **power-cycle**: the setting already says
+  `off`, so the unit comes back normally. You don't need to pull the SD
   card.
-- To run it again, uncomment the line again.
+- To run the next step, set its key to `once` and reboot. The plugin's line
+  in `ur0:tai/config.txt` stays as it is.
 
-It only ever edits `ur0:tai/config.txt` and writes a log. Nothing is
+It only ever edits its own `cpu_tweaks.ini` and writes logs. Nothing is
 written to the boot chain, eMMC partitions, or flash. If it can't *confirm*
-it disabled itself, it aborts before doing any of the risky work rather
-than running without that safety net.
+the line now says `off`, it does nothing at all that boot rather than
+running without that safety net.
 
 ## Install
 
-1. Copy `cpu_tweaks.skprx` to `ur0:tai/`. Keep the filename — the
-   self-disable looks for a line containing `cpu_tweaks.skprx`.
+1. Copy `cpu_tweaks.skprx` to `ur0:tai/`.
 2. Copy `cpu_tweaks.ini` to `ur0:data/`. It's INI-style so editors
    highlight it. Editing it on Windows is fine — LF, CRLF and bare CR line
    endings all work, and a UTF-8 BOM is ignored.
@@ -50,30 +50,25 @@ than running without that safety net.
    *KERNEL
    ur0:tai/cpu_tweaks.skprx
    ```
-
-   It must be `ur0:tai/config.txt` specifically — that's the only path the
-   self-disable knows how to edit.
 4. Reboot.
 
 ## Please go up this ladder, one reboot at a time
 
 `ur0:data/cpu_tweaks.ini` ships set to step 1. After each boot, read
-`ur0:data/cpu_tweaks.log`, then re-enable the config.txt line, change
-the config as below, and reboot for the next step.
+`ur0:data/cpu_tweaks.log`, then set the next step's key and reboot.
 
-1. **`probe = on`, `enable = off`** (as shipped). Read-only: dumps your secure page-table
+1. **`probe = once`** (as shipped). Read-only: dumps your secure page-table
    layout and makes no secure writes whatsoever. This is the most useful
    step to send back — it says whether the rest would even work on your
    firmware. The log will be large; that's expected.
-2. **`probe = off`, `enable = on`**. Sets the PL310 fields with one secure MMIO write, and
+2. **`enable = once`**. Sets the PL310 fields with one secure MMIO write, and
    the ACTLR bit by injecting a page-table descriptor to get a
    secure-executable scratch page, running a 9-word stub on each core, then
    cleaning up after itself. Expect `actlr before 0x149` / `after 0x14B`
    four times, `actlr: requested bits APPLIED on all cores`,
    `prefetch_ctrl before 0x21000000` / `after 0x3100000F` and
    `pl310: requested fields APPLIED`.
-3. **`benchmark = once`**. First switches its own config line to
-   `benchmark = off`. Then, 30 seconds after boot, it raises the clocks to game
+3. **`benchmark = once`**. 30 seconds after boot, it raises the clocks to game
    levels (CPU 500 MHz), runs a memory benchmark across the prefetch
    settings for about 40 seconds, puts the firmware's settings and clocks
    back, and reboots the console. Leave the Vita alone for two minutes
@@ -94,9 +89,9 @@ plain text and contains no personal data.
 
 Lines worth a quick look yourself:
 
-- `selfdisable: own config.txt line commented out for next boot` — the
-  safety net worked. If you instead see `selfdisable: FAILED`, nothing
-  risky ran at all; the following line says why.
+- `once: config now says off for the next boot` — the safety net worked.
+  If you instead see `once: switch FAILED, running NOTHING`, nothing risky
+  ran at all.
 - `cfk_init_ret 0x00000005` — secure-world access came up. A negative value
   means psp2spl couldn't initialise on your firmware, and nothing after it
   was attempted.
@@ -107,10 +102,11 @@ Lines worth a quick look yourself:
 
 - Settings apply on **cold boot only**, not resume-from-sleep. Whether
   these bits survive sleep on this hardware is untested.
-- The measured benefit is narrow: roughly +19% to +43% on tight 8–16 byte
-  strided access, and PL310 on its own can actually *hurt* at 128+ byte
-  strides. It is not a general speed-up, and it will not rescue a
-  GPU-bound or pointer-chasing workload.
+- The benefit is for strided or streaming memory access: on the 3.60 test
+  unit at 500 MHz, 60-66% fewer cycles per load at 4-16 byte strides,
+  about 50% at 32-64 bytes, falling to 17% at 512. Random pointer-chasing
+  gains only ~7%. It is not a general speed-up, and it will not rescue a
+  GPU-bound workload.
 
 Source, full technical writeup and the record of every dead end:
 <https://github.com/devnoname120/vita_cpu_tweaks>

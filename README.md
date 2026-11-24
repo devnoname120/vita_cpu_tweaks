@@ -6,14 +6,17 @@ at every boot. Every prefetch-related register field gets its own key in a
 plain INI-style config file — no rebuilding, no runtime tool needed.
 
 ```ini
-enable = on                  # on | off
+enable = on                  # off | on | once
 actlr.l2_prefetch_hint = on  # Cortex-A9 ACTLR bit 1
 pl310.data_prefetch = on     # PL310 PREFETCH_CTRL bit 28
 pl310.prefetch_offset = 15   # PL310 PREFETCH_CTRL bits 4:0
 ```
 
-Plus `probe = on` for a read-only recon log and `benchmark = once` for a
-one-shot on-device benchmark that switches itself back off and reboots. See
+`enable = once` applies the settings for one boot: the plugin rewrites the
+line to `enable = off` before doing anything, so if that boot ever hangs, a
+plain power-cycle comes back without it. Plus `probe = once` for a
+read-only diagnostic log and `benchmark = once` for an on-device benchmark
+that reboots when it is done. See
 [`cpu_tweaks.example.ini`](cpu_tweaks.example.ini) for every key,
 each documented right above it.
 
@@ -45,15 +48,10 @@ Two things gate whether it works at all on a given unit/firmware:
    a logged reason instead of doing something unpredictable.
 
 Go cautiously on any configuration other than retail 3.60: start with
-`probe = on` (read-only), confirm the plugin loads and the log looks sane,
-*then* set `enable = on` and read `ur0:data/cpu_tweaks.log` after the
-next boot.
-
-Note also that the dead-man's switch (below) comments out the plugin's own
-`config.txt` line on every boot, so by default it applies the settings once
-and then disables itself. That is deliberate for testing. `self_disable = no`
-keeps it enabled across boots, which removes that safety net: only set it
-once `enable = on` has booted cleanly on your unit.
+`probe = once` (read-only), confirm the log looks sane, then `enable = once`,
+and only switch to `enable = on` once a `once` boot has worked. `on` has no
+safety net: if it ever hung, it would hang on every boot until the plugin's
+line is removed from `config.txt`.
 
 This also only re-applies on a **cold boot** — not on resume-from-sleep.
 Whether sleep/resume clears these bits on this hardware was never safely
@@ -108,16 +106,17 @@ The full tables, the ~330 MHz runs and the method are in
    ur0:tai/cpu_tweaks.skprx
    ```
 3. Copy [`cpu_tweaks.example.ini`](cpu_tweaks.example.ini) to
-   `ur0:data/cpu_tweaks.ini` and set `enable = on` (it ships as
+   `ur0:data/cpu_tweaks.ini` and set `enable = once` (it ships as
    `enable = off`, with the measured-best register values already filled in).
+   Once that boot has worked, set `enable = on` to apply them at every boot.
 4. Reboot. `config.txt` is only read at boot, and this plugin only rereads
    its own config file at boot too — so any change to either file needs
    one more reboot to take effect.
 
 **Go cautiously the first time:** start with everything off, confirm the
 plugin loads and exits cleanly (check `ur0:data/cpu_tweaks.log` after
-boot — it should say `nothing to do, exiting cleanly`), then `probe = on`,
-*then* `enable = on`. Keep a way to get back into `config.txt` (recovery
+boot — it should say `nothing to do, exiting cleanly`), then
+`probe = once`, then `enable = once`, *then* `enable = on`. Keep a way to get back into `config.txt` (recovery
 menu, another kernel plugin, etc.) in case anything about your specific
 unit/firmware doesn't match what this was built against.
 
@@ -171,8 +170,8 @@ secure VA to an unused physical page inside the TZ region, as Normal
 Non-Cacheable, PL1-RW and executable. Non-cacheable is load-bearing — it
 removes every cache-maintenance concern, including PL310's
 security-tagged lines — and a VA that was invalid before cannot be holding
-a stale TLB entry. The 4-instruction stub is then written with secure
-writes, read back through the new mapping as a gate, executed per core via
+a stale TLB entry. A 9-word stub (read ACTLR, clear and set masks loaded
+from the same page, write ACTLR) is then written with secure writes, read back through the new mapping as a gate, executed per core via
 psp2spl's `EXEC_WITH_SP`, and the scratch page and descriptor are both
 cleaned up afterwards.
 

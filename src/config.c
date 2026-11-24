@@ -24,16 +24,6 @@ static int streq_ci(const char *a, int alen, const char *b)
     return 1;
 }
 
-static int contains_n(const char *hay, int haylen, const char *needle)
-{
-    for (int i = 0; i < haylen; i++) {
-        int j = 0;
-        while (needle[j] && i + j < haylen && hay[i + j] == needle[j]) j++;
-        if (needle[j] == '\0') return 1;
-    }
-    return 0;
-}
-
 /* A UTF-8 BOM. Windows editors add one silently, and without this the first
  * key of the file would never match. */
 static int skip_bom(const char *buf, int n)
@@ -117,6 +107,14 @@ static void set_tri(int *slot, const char *val, int vallen, int *ignored)
 
 /* on -> 1, off -> 0; anything else leaves the field and counts as ignored.
  * A bad value can therefore never turn something on. */
+static void set_run(int *slot, const char *val, int vallen, int *ignored)
+{
+    if      (streq_ci(val, vallen, "off"))  *slot = PFE_RUN_OFF;
+    else if (streq_ci(val, vallen, "on"))   *slot = PFE_RUN_ON;
+    else if (streq_ci(val, vallen, "once")) *slot = PFE_RUN_ONCE;
+    else (*ignored)++;
+}
+
 static void set_onoff(int *slot, const char *val, int vallen, int *ignored)
 {
     if      (streq_ci(val, vallen, "on"))  *slot = 1;
@@ -139,20 +137,17 @@ static void apply_key(struct pfe_config *out, const char *key, int keylen,
         }
 
     if (streq_ci(key, keylen, "enable")) {
-        set_onoff(&out->enable, val, vallen, &out->ignored);
+        set_run(&out->enable, val, vallen, &out->ignored);
     } else if (streq_ci(key, keylen, "log")) {
         set_onoff(&out->log, val, vallen, &out->ignored);
     } else if (streq_ci(key, keylen, "probe")) {
-        set_onoff(&out->probe, val, vallen, &out->ignored);
+        /* off | once: a read-only diagnostic has no reason to run every boot */
+        if (streq_ci(val, vallen, "on")) out->ignored++;
+        else set_run(&out->probe, val, vallen, &out->ignored);
     } else if (streq_ci(key, keylen, "benchmark")) {
         if      (streq_ci(val, vallen, "once")) out->bench = 1;
         else if (streq_ci(val, vallen, "off"))  out->bench = 0;
         else out->ignored++;
-    } else if (streq_ci(key, keylen, "self_disable")) {
-        /* Only an explicit "no" turns the dead-man's switch off. */
-        if      (streq_ci(val, vallen, "no"))  out->self_disable = 0;
-        else if (streq_ci(val, vallen, "yes")) out->self_disable = 1;
-        else { out->self_disable = 1; out->ignored++; }
     } else if (streq_ci(key, keylen, "pl310.prefetch_offset")) {
         if (streq_ci(val, vallen, "keep")) { out->pl310_offset = -1; return; }
         int v = parse_small_uint(val, vallen);
@@ -173,10 +168,9 @@ static void apply_key(struct pfe_config *out, const char *key, int keylen,
 
 void pfe_parse_config(const char *buf, int n, struct pfe_config *out)
 {
-    out->enable = 0;
-    out->probe = 0;
+    out->enable = PFE_RUN_OFF;
+    out->probe = PFE_RUN_OFF;
     out->bench = 0;
-    out->self_disable = 1;
     out->log = 1;
     for (int i = 0; i < PFE_ACTLR_NFIELDS; i++) out->actlr[i] = PFE_KEEP;
     for (int i = 0; i < PFE_PL310_NFIELDS; i++) out->pl310[i] = PFE_KEEP;
@@ -233,9 +227,11 @@ void pfe_config_masks(const struct pfe_config *cfg, struct pfe_masks *m)
     }
 }
 
-/* Finds the value of the next active `benchmark = once` line at or after
+static const char *const once_keys[] = { "enable", "probe", "benchmark" };
+
+/* Finds the value of the next active `<once key> = once` line at or after
  * *pos. Returns its offset in buf, or -1. Advances *pos past that line. */
-static int find_benchmark_once(const char *buf, int n, int *pos)
+static int find_once(const char *buf, int n, int *pos)
 {
     int start = 0, len = 0;
     while (next_line(buf, n, pos, &start, &len)) {
@@ -251,7 +247,10 @@ static int find_benchmark_once(const char *buf, int n, int *pos)
         const char *key = line;
         int keylen = eq;
         trim(&key, &keylen);
-        if (!streq_ci(key, keylen, "benchmark")) continue;
+        int is_once_key = 0;
+        for (unsigned k = 0; k < sizeof(once_keys) / sizeof(once_keys[0]); k++)
+            if (streq_ci(key, keylen, once_keys[k])) is_once_key = 1;
+        if (!is_once_key) continue;
 
         const char *val = line + eq + 1;
         int vallen = l - eq - 1;
@@ -263,12 +262,12 @@ static int find_benchmark_once(const char *buf, int n, int *pos)
     return -1;
 }
 
-int pfe_config_disable_bench(char *buf, int *io_n)
+int pfe_config_consume_once(char *buf, int *io_n)
 {
     if (!buf || !io_n || *io_n <= 0) return 0;
     int n = *io_n, changed = 0;
     int pos = skip_bom(buf, n), at;
-    while ((at = find_benchmark_once(buf, n, &pos)) >= 0) {
+    while ((at = find_once(buf, n, &pos)) >= 0) {
         /* "once" (4) -> "off" (3): overwrite, then close the 1-byte gap. */
         buf[at] = 'o'; buf[at + 1] = 'f'; buf[at + 2] = 'f';
         for (int i = at + 4; i < n; i++) buf[i - 1] = buf[i];
@@ -280,42 +279,7 @@ int pfe_config_disable_bench(char *buf, int *io_n)
     return changed;
 }
 
-int pfe_comment_out_lines(char *buf, int *io_n, int cap, const char *needle)
+int pfe_config_has_once(const struct pfe_config *cfg)
 {
-    if (!buf || !io_n || *io_n <= 0) return 0;
-
-    int n = *io_n;
-
-    /* Count first, so a buffer that cannot hold every '#' leaves the caller's
-     * file completely untouched rather than half-edited. */
-    int hits = 0;
-    {
-        int pos = 0, start = 0, len = 0;
-        while (next_line(buf, n, &pos, &start, &len)) {
-            const char *tl = buf + start;
-            int tlen = len;
-            trim(&tl, &tlen);
-            if (tlen > 0 && tl[0] != '#' && contains_n(tl, tlen, needle)) hits++;
-        }
-    }
-    if (hits == 0) return 0;
-    if (n + hits > cap) return -1;
-
-    int done = 0;
-    int pos = 0, start = 0, len = 0;
-    while (next_line(buf, n, &pos, &start, &len)) {
-        const char *tl = buf + start;
-        int tlen = len;
-        trim(&tl, &tlen);
-        if (!(tlen > 0 && tl[0] != '#' && contains_n(tl, tlen, needle))) continue;
-
-        for (int i = n; i > start; i--) buf[i] = buf[i - 1];
-        buf[start] = '#';
-        n++;
-        pos++;      /* this line's terminator just shifted right by one */
-        done++;
-    }
-
-    *io_n = n;
-    return done;
+    return cfg->enable == PFE_RUN_ONCE || cfg->probe == PFE_RUN_ONCE || cfg->bench;
 }

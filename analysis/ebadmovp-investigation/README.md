@@ -312,6 +312,21 @@ That splits the two knobs:
   enabled and applied ACTLR `0x14B` x4 and PL310 `0x3100000F`. No crash dump.
   (In the code and earlier entries, "bench mode" refers to this.)
 
+* **The dead-man's switch moves into the config: `enable = off | on | once`
+  (boots 52-56).** The plugin no longer edits `ur0:tai/config.txt` at all;
+  its line stays enabled and `cpu_tweaks.ini` alone decides. `once` (for
+  `enable`, `probe` and `benchmark`) is rewritten to `off` and confirmed by
+  reading the file back before any secure-world work - the same protection
+  as before, since a hang is recovered by a power-cycle into `off`, but
+  without testers re-enabling a config.txt line each step. `on` has no net
+  and is meant for settings already proven as `once`. `probe` is
+  `off | once` only (a diagnostic has no reason to run every boot), and
+  `benchmark` stays `once | off`. Verified: boot 52 `enable = once` applied
+  and left `enable = off` with the config.txt line still active; boot 53
+  then did nothing; boots 54-55 `enable = on` applied both times; boot 56,
+  the tester config as shipped (`probe = once`), probed read-only and
+  switched itself off.
+
   The rest of this bullet is the record of how the dead ends were eliminated.
 
 * **L1 / ACTLR - the dead ends, and why the devkit's technique does not port.**

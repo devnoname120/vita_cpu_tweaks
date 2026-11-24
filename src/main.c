@@ -3,32 +3,28 @@
  * on a PS Vita, from a config.txt-loaded taiHEN kernel plugin.
  *
  * The Vita's kernel_boot_loader explicitly disables both hardware
- * prefetchers at boot. This plugin re-enables either or both, every cold
- * boot, controlled by a plain text config file:
+ * prefetchers at boot. This plugin sets the prefetch-related fields of the
+ * A9's ACTLR and the PL310's PREFETCH_CTRL as its config file says:
  *
- *     ur0:data/cpu_tweaks.ini
+ *     ur0:data/cpu_tweaks.ini      (documented: cpu_tweaks.example.ini)
  *
- *     # l1_prefetch: Cortex-A9 ACTLR L1 D-side prefetch + L2 prefetch hint (bits 2:1)
- *     # l2_prefetch: ARM PL310 L2C-310 data prefetch (PREFETCH_CTRL bit 28) -- on/off
- *     l1_prefetch=off
- *     l2_prefetch=off
+ *     enable = off | on | once
+ *     actlr.l2_prefetch_hint = on
+ *     pl310.data_prefetch = on
+ *     pl310.prefetch_offset = 15
+ *     ...one on | off | keep key per register field
  *
- * Each key independently takes "on" or "off" (case-insensitive, whitespace
- * around '=' ignored). Anything else - a missing key, a bad value, a
- * missing or unreadable file - is treated as "off": a boot-time module that
- * can't read its own config should do nothing, not guess. Lines starting
- * with '#' (after trimming leading whitespace) are comments and ignored.
+ * Parsing lives in config.c and is host-tested. Anything not understood -
+ * a missing key, a bad value, an unreadable file - leaves that setting
+ * alone: a boot-time module that can't read its own config does nothing.
  *
- * Dead-man's switch: every boot, before touching config or secure-world
- * state, the plugin comments out its OWN line in ur0:tai/config.txt. If
- * this boot hangs or crashes, a plain power cycle recovers normally - the
- * next boot's taiHEN never loads it. To run it again, manually uncomment
- * that line again before rebooting.
+ * Dead-man's switch: "once" (for enable, probe and benchmark) is rewritten
+ * to "off" in the config file, and confirmed by reading it back, before any
+ * secure-world work. If that boot hangs or crashes, a plain power cycle
+ * comes back with it off. "on" has no such net; it is for settings that
+ * have already worked as "once".
  *
-
- * "off" touches NO secure-world state at all - the hardware is already
- * disabled at this point in boot, so there is nothing to clear. Only
- * "on" for either key runs the secure-world stub below.
+ * With nothing enabled the plugin touches NO secure-world state at all.
  *
  * Requires SKGleba's psp2spl (https://github.com/SKGleba/psp2spl) for
  * secure-world (TrustZone) code execution - see the top-level README for
@@ -66,12 +62,10 @@ void *memset(void *dst, int c, unsigned int n)
 
 #define CONFIG_PATH "ur0:data/cpu_tweaks.ini"
 /* A bench run's own copy of the log. The reboot that ends a bench is followed
- * by a normal boot, which - with self_disable=no - would overwrite LOG_PATH. */
+ * by a normal boot, which - with the plugin enabled - would overwrite LOG_PATH. */
 #define BENCH_LOG_PATH "ur0:data/cpu_tweaks_bench.log"
 #define LOG_PATH    "ur0:data/cpu_tweaks.log"
 
-#define TAI_CONFIG_PATH   "ur0:tai/config.txt"
-#define SELF_SKPRX_NEEDLE "cpu_tweaks.skprx"
 
 /*
  * ACTLR/PL310 set stubs - executed in place, through a fresh execute-only
@@ -332,82 +326,13 @@ static int kprintf_noop_handler(int unk, const char *format, va_list args)
 static void log_hex_line(const char *prefix, unsigned int v)
 {
     static const char hexd[] = "0123456789ABCDEF";
-    char buf[64];
+    char buf[128];                      /* prefix up to 100 + "0x" + 8 digits */
     int n = 0;
-    while (prefix[n] && n < 40) { buf[n] = prefix[n]; n++; }
+    while (prefix[n] && n < 100) { buf[n] = prefix[n]; n++; }
     buf[n++] = '0'; buf[n++] = 'x';
     for (int shift = 28; shift >= 0; shift -= 4) buf[n++] = hexd[(v >> shift) & 0xF];
     buf[n] = '\0';
     log_line(buf);
-}
-
-/*
- * Dead-man's switch: comments out this plugin's own line(s) in
- * ur0:tai/config.txt before module_start() does anything else. taiHEN only
- * reads config.txt once, at boot, before loading us - editing it now can't
- * affect the boot in progress, only the next one. So if this boot's later
- * secure-world work hangs or crashes, a plain power cycle then skips
- * loading us entirely: no SD2VITA / manual file edit needed to recover.
- * Re-enabling after a clean boot means manually uncommenting the line.
- *
- * Gating, not best-effort: if we can't *confirm* the switch is set, the
- * caller must skip the risky work for this boot too, rather than silently
- * running it with no net. stat-then-read (instead of just capping the
- * read) is what lets us tell "file fits" apart from "file truncated by our
- * own buffer" - writing back a truncated read would destroy the rest of
- * the user's real config.txt.
- */
-static int self_disable_in_config(const char **reason)
-{
-    SceIoStat st;
-    memset(&st, 0, sizeof(st));
-    if (ksceIoGetstat(TAI_CONFIG_PATH, &st) < 0) {
-        *reason = "stat failed";
-        return 0;
-    }
-
-    static char cfg[16384];
-    if (st.st_size < 0 || st.st_size > (SceOff)sizeof(cfg) - 1) {
-        *reason = "config.txt too large for buffer";
-        return 0;
-    }
-
-    SceUID fd = ksceIoOpen(TAI_CONFIG_PATH, SCE_O_RDONLY, 0);
-    if (fd < 0) {
-        *reason = "open(r) failed";
-        return 0;
-    }
-    int n = ksceIoRead(fd, cfg, sizeof(cfg) - 1);
-    ksceIoClose(fd);
-    if (n <= 0) {
-        *reason = "read failed/empty";
-        return 0;
-    }
-
-    int hits = pfe_comment_out_lines(cfg, &n, (int)sizeof(cfg), SELF_SKPRX_NEEDLE);
-    if (hits < 0) {
-        *reason = "no room to insert '#'";
-        return 0;
-    }
-    if (hits == 0) {
-        *reason = "own line not found";
-        return 0;
-    }
-
-    fd = ksceIoOpen(TAI_CONFIG_PATH, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
-    if (fd < 0) {
-        *reason = "open(w) failed";
-        return 0;
-    }
-    int w = ksceIoWrite(fd, cfg, (SceSize)n);
-    ksceIoClose(fd);
-    if (w != n) {
-        *reason = "short write";
-        return 0;
-    }
-
-    *reason = "ok";
-    return 1;
 }
 
 /*
@@ -456,10 +381,10 @@ static void read_config(struct pfe_config *cfg)
     log_hex_line("config: bytes parsed ", (unsigned int)n);
     static const char *const tri[] = { "keep", "on", "off" };
     char line[96];
-    snprintf(line, sizeof(line), "config: enable=%s probe=%s benchmark=%s self_disable=%s log=%s",
-             cfg->enable ? "on" : "off", cfg->probe ? "on" : "off",
-             cfg->bench ? "once" : "off", cfg->self_disable ? "yes" : "no",
-             cfg->log ? "on" : "off");
+    static const char *const run[] = { "off", "on", "once" };
+    snprintf(line, sizeof(line), "config: enable=%s probe=%s benchmark=%s log=%s",
+             run[cfg->enable % 3], run[cfg->probe % 3],
+             cfg->bench ? "once" : "off", cfg->log ? "on" : "off");
     log_line(line);
     for (int i = 0; i < PFE_ACTLR_NFIELDS; i++) {
         snprintf(line, sizeof(line), "config: %s=%s",
@@ -1530,13 +1455,14 @@ static void save_bench_log(void)
 }
 
 /*
- * Rewrites benchmark = once to benchmark = off in the plugin's own config,
- * then reads the file back and checks it now parses with the benchmark off.
- * Gating, like the dead-man's switch: a bench that ends in a reboot must not
- * be able to run again on the next boot, or self_disable=no would turn it
- * into a reboot loop. Returns 0 only when that is confirmed.
+ * The dead-man's switch: rewrites every enable/probe/benchmark = once line
+ * to "off" in the plugin's own config, then reads the file back and checks
+ * nothing says "once" any more. Done before any secure-world work, so if
+ * this boot hangs, a plain power-cycle comes back with those switched off.
+ * Gating: returns 0 only when that is confirmed from disk; otherwise the
+ * caller runs nothing this boot.
  */
-static int disable_bench_in_config(void)
+static int consume_once_in_config(void)
 {
     static char buf[PFE_CONFIG_MAX_BYTES];
     SceUID fd = ksceIoOpen(CONFIG_PATH, SCE_O_RDONLY, 0);
@@ -1545,8 +1471,8 @@ static int disable_bench_in_config(void)
     ksceIoClose(fd);
     if (n <= 0 || n >= (int)sizeof(buf)) return -2;
 
-    int changed = pfe_config_disable_bench(buf, &n);
-    log_hex_line("benchmark: once->off lines ", (unsigned int)changed);
+    int changed = pfe_config_consume_once(buf, &n);
+    log_hex_line("once: lines switched to off ", (unsigned int)changed);
     if (changed > 0) {
         fd = ksceIoOpen(CONFIG_PATH, SCE_O_WRONLY | SCE_O_TRUNC, 0);
         if (fd < 0) return -3;
@@ -1562,7 +1488,7 @@ static int disable_bench_in_config(void)
     ksceIoClose(fd);
     struct pfe_config check;
     pfe_parse_config(buf, n > 0 ? n : 0, &check);
-    return check.bench ? -6 : 0;
+    return pfe_config_has_once(&check) ? -6 : 0;
 }
 
 /*
@@ -1622,52 +1548,32 @@ int module_start(SceSize argc, const void *args)
     g_log_len = 0;
     log_line("==== vita_cpu_tweaks boot start ====");
 
-    /*
-     * The config is read before the dead-man's switch so that
-     * self_disable=no can be honoured. Reading it is plain file I/O with no
-     * secure-world work, so nothing risky happens before the switch either way.
-     */
     struct pfe_config cfg;
     read_config(&cfg);
     g_log_to_disk = cfg.log;
 
-    if (cfg.self_disable) {
-        const char *disable_reason = "";
-        if (self_disable_in_config(&disable_reason)) {
-            log_line("selfdisable: own config.txt line commented out for next boot");
-        } else {
-            log_line("selfdisable: FAILED - aborting before any secure-world work");
-            log_line(disable_reason);
+    /*
+     * Anything set to "once" is switched off in the config before any
+     * secure-world work, so the next boot - including one after a hang -
+     * comes up without it. Gating: if that cannot be confirmed, nothing runs.
+     */
+    if (pfe_config_has_once(&cfg)) {
+        int r = consume_once_in_config();
+        if (r < 0) {
+            log_hex_line("once: switch FAILED, running NOTHING ",
+                         (unsigned int)r);
             goto write_out;
         }
-    } else {
-        log_line("selfdisable: self_disable=no - staying enabled for next boot");
-    }
-
-    /*
-     * benchmark = once: switch it off in the config before anything else,
-     * so the reboot that ends the run - and any boot after a crash during
-     * it - comes up with enable/probe exactly as the user left them.
-     * Gating: if that cannot be confirmed, the bench does not run.
-     */
-    if (cfg.bench) {
-        int dr = disable_bench_in_config();
-        if (dr < 0) {
-            log_hex_line("benchmark: could not switch it to off in the config, NOT running: ",
-                         (unsigned int)dr);
-            cfg.bench = 0;
-        } else {
-            log_line("benchmark: config now says benchmark = off for the next boot");
-        }
+        log_line("once: config now says off for the next boot");
         flush_log_to_disk();
     }
 
     struct pfe_masks mk;
     pfe_config_masks(&cfg, &mk);
-    int want_actlr = cfg.enable && (mk.actlr_set | mk.actlr_clear) != 0;
-    int want_pl310 = cfg.enable && (mk.pl310_set | mk.pl310_clear) != 0;
+    int want_actlr = cfg.enable != PFE_RUN_OFF && (mk.actlr_set | mk.actlr_clear) != 0;
+    int want_pl310 = cfg.enable != PFE_RUN_OFF && (mk.pl310_set | mk.pl310_clear) != 0;
 
-    if (!cfg.bench && !cfg.probe && !want_actlr && !want_pl310) {
+    if (!cfg.bench && cfg.probe == PFE_RUN_OFF && !want_actlr && !want_pl310) {
         log_line("nothing to do, exiting cleanly");
         goto write_out;
     }
@@ -1683,7 +1589,7 @@ int module_start(SceSize argc, const void *args)
         flush_log_to_disk(); /* checkpoint: past the point every prior boot failed at */
     }
 
-    if (cfg.probe) {
+    if (cfg.probe != PFE_RUN_OFF) {
         probe_cpu_regs();
         probe_secure_layout();
         probe_sysmem_tail();
@@ -1722,7 +1628,7 @@ int module_start(SceSize argc, const void *args)
         goto write_out;
     }
 
-    /* enable = on */
+    /* enable = on | once */
     if (want_actlr) {
         apply_l1_actlr(mk.actlr_set, mk.actlr_clear);
         flush_log_to_disk();

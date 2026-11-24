@@ -1,5 +1,5 @@
 /*
- * Pure text parsing for the plugin's two config files, with no vitasdk or
+ * Pure text parsing for the plugin's config file, with no vitasdk or
  * psp2spl dependency, so src/tests/test_config.c can exercise it on the host.
  * All file I/O stays in main.c; these take and return buffers.
  */
@@ -42,11 +42,21 @@ struct pfe_field {
 extern const struct pfe_field pfe_actlr_fields[PFE_ACTLR_NFIELDS];
 extern const struct pfe_field pfe_pl310_fields[PFE_PL310_NFIELDS];
 
+/*
+ * off | on | once. "once" is the safety net: the plugin rewrites the line to
+ * "off" in its own config file before doing anything risky, so a boot that
+ * hangs is recovered by a plain power-cycle.
+ */
+enum pfe_run {
+    PFE_RUN_OFF  = 0,
+    PFE_RUN_ON   = 1,
+    PFE_RUN_ONCE = 2
+};
+
 struct pfe_config {
-    int enable;                       /* enable: apply the register fields */
-    int probe;                        /* probe: read-only recon, no secure writes */
-    int bench;                        /* benchmark = once: one-shot run, then reboot */
-    int self_disable;                 /* 1 unless self_disable=no */
+    int enable;                       /* enable: enum pfe_run - apply the register fields */
+    int probe;                        /* probe:  PFE_RUN_OFF or PFE_RUN_ONCE - read-only recon */
+    int bench;                        /* benchmark: 1 = once (then reboot), 0 = off */
     int log;                          /* log: 1 = on (default), 0 = off */
     int actlr[PFE_ACTLR_NFIELDS];     /* enum pfe_tri, same order as pfe_actlr_fields */
     int pl310[PFE_PL310_NFIELDS];     /* enum pfe_tri, same order as pfe_pl310_fields */
@@ -104,14 +114,15 @@ void pfe_parse_config(const char *buf, int n, struct pfe_config *out);
  * -1 if there was not enough room, in which case `buf` is left untouched.
  */
 /*
- * Rewrites every active `benchmark = once` line in buf to `benchmark = off`,
- * in place, keeping spacing, case of the key, line endings and any trailing
- * comment. The value shrinks by one byte per line, so *io_n only goes down.
- * Returns the number of lines changed. This is what makes `once` mean once:
- * the reboot that ends the run boots with the rest of the config unchanged.
+ * Rewrites every active `enable = once`, `probe = once` and
+ * `benchmark = once` line in buf to `... = off`, in place, keeping spacing,
+ * case of the key, line endings and any trailing comment. Each value shrinks
+ * by one byte, so *io_n only goes down. Returns the number of lines changed.
+ * This is what makes "once" mean once.
  */
-int pfe_config_disable_bench(char *buf, int *io_n);
+int pfe_config_consume_once(char *buf, int *io_n);
 
-int pfe_comment_out_lines(char *buf, int *io_n, int cap, const char *needle);
+/* 1 if any of enable / probe / benchmark is "once". */
+int pfe_config_has_once(const struct pfe_config *cfg);
 
 #endif /* PFE_CONFIG_H */
