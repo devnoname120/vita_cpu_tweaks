@@ -207,17 +207,33 @@ static int kprintf_capture_handler(int unk, const char *format, va_list args)
         (void)va_arg(args_copy, int);          /* mod */
         unsigned int text_base = va_arg(args_copy, unsigned int);
         unsigned int off       = va_arg(args_copy, unsigned int);
-        unsigned int fail_sva  = text_base + off;
-        /* A +/-0x80 window found no MOVW/MOVT pair at all, so go much
-         * wider: 4KB centered on the failing offset, packed 8 words/line
-         * to fit g_log. */
-        unsigned int win_start = (fail_sva & ~0x3Fu) - 0x800u;
+        {
+            char line[48];
+            snprintf(line, sizeof(line), "movp fail off 0x%X", off);
+            append_log(line); /* NOT log_hex_line: that calls ksceDebugPrintf,
+                                * which would re-enter this handler. */
+        }
+
+        /* A +/-0x80 window around the failing offset found no MOVW/MOVT
+         * pair at all; a later +/-0x800 window found exactly one
+         * plausible candidate (text+0x1488), which tested HUNG on
+         * hardware - see feedback-security-check-bypass-risk memory.
+         * Widen the net instead of guessing again: dump a fixed 8KB
+         * block from .text's own base, covering ground neither prior
+         * window reached, so a static scan has more to work with before
+         * any further live test is even considered. */
+        unsigned int win_start = text_base;
+        unsigned int win_len   = 0x2000u;
 
         void *nsva = NULL;
         int r = SPLx_TZS_SVA2NSVA(win_start, &nsva);
         if (r >= 0) {
             volatile unsigned int *p = (volatile unsigned int *)nsva;
-            for (unsigned int i = 0; i < 0x1000u; i += 32) {
+            for (unsigned int i = 0; i < win_len; i += 32) {
+                if (g_log_len >= (int)sizeof(g_log) - 100) {
+                    append_log("dump truncated: g_log full");
+                    break;
+                }
                 char line[96];
                 unsigned int base_off = (win_start - text_base) + i;
                 int n2 = snprintf(line, sizeof(line), "%X:", base_off);
