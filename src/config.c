@@ -79,6 +79,7 @@ void pfe_parse_config(const char *buf, int n, struct pfe_config *out)
     out->want_l2 = 0;
     out->probe_only = 0;
     out->alloc_one_way = PFE_KEEP;
+    out->bench = 0;
 
     if (!buf || n <= 0) return;
 
@@ -107,6 +108,7 @@ void pfe_parse_config(const char *buf, int n, struct pfe_config *out)
         if (streq_ci(key, keylen, "l1_prefetch"))      out->want_l1 = on;
         else if (streq_ci(key, keylen, "l2_prefetch")) out->want_l2 = on;
         else if (streq_ci(key, keylen, "probe_only"))  out->probe_only = on;
+        else if (streq_ci(key, keylen, "bench"))       out->bench = on;
         else if (streq_ci(key, keylen, "actlr_alloc_one_way"))
             out->alloc_one_way = parse_tri(val, vallen);
     }

@@ -40,6 +40,18 @@ static void check_tri(const char *name, const char *text, int want)
     }
 }
 
+static void check_bench(const char *name, const char *text, int want)
+{
+    struct pfe_config c;
+    pfe_parse_config(text, (int)strlen(text), &c);
+    if (c.bench != want) {
+        printf("FAIL %-44s bench=%d (want %d)\n", name, c.bench, want);
+        failures++;
+    } else {
+        printf("ok   %s\n", name);
+    }
+}
+
 static void check_comment(const char *name, const char *in, const char *want,
                           int want_ret)
 {
@@ -142,6 +154,14 @@ int main(void)
               "actlr_alloc_one_way=off\nactlr_alloc_one_way=on\n", PFE_ON);
     check_tri("tri: does not match l1_prefetch key",
               "l1_prefetch=off\n", PFE_KEEP);
+
+    /* --- bench --- */
+    check_bench("bench: default off", "probe_only=on\n", 0);
+    check_bench("bench: on", "bench=on\n", 1);
+    check_bench("bench: CRLF", "bench=on\r\n", 1);
+    check_bench("bench: off", "bench=off\n", 0);
+    check_bench("bench: commented", "#bench=on\n", 0);
+    check_bench("bench: not a prefix match", "benchmark=on\n", 0);
 
     /* --- dead-man's switch --- */
     check_comment("switch: LF",

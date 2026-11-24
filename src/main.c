@@ -53,6 +53,7 @@
 #define SPL_CFK_TZSFULL
 #include "libspl-cfk.h"
 #include "config.h"
+#include "bench.h"
 
 #define LOG(...) ksceDebugPrintf("[PFE] " __VA_ARGS__)
 
@@ -418,6 +419,7 @@ static void read_config(struct pfe_config *cfg)
 
     log_hex_line("config: bytes parsed ", (unsigned int)n);
     log_line(cfg->probe_only ? "config: probe_only=on"  : "config: probe_only=off");
+    log_line(cfg->bench      ? "config: bench=on"       : "config: bench=off");
     log_line(cfg->want_l1    ? "config: l1_prefetch=on" : "config: l1_prefetch=off");
     log_line(cfg->want_l2    ? "config: l2_prefetch=on" : "config: l2_prefetch=off");
     log_line(cfg->alloc_one_way == PFE_ON  ? "config: actlr_alloc_one_way=on"  :
@@ -913,19 +915,36 @@ static unsigned int tz_find_scratch_pa(void)
  *   - after the write, secure world must read our instructions back through
  *     the new mapping, or we never execute it.
  */
-static void apply_l1_actlr(unsigned int set_mask, unsigned int clear_mask)
+/*
+ * Everything the apply step needs, resolved once. The discovery walks are not
+ * cheap - the writable-secure-VA sweep alone probes 4096 addresses through
+ * both TTBRs - and the benchmark suite calls the apply step once per
+ * configuration, so repeating the search every time would add seconds to
+ * boot. The descriptor itself is still injected and removed around each
+ * individual apply, so nothing is left mapped between calls.
+ */
+static struct {
+    int resolved;
+    unsigned int scratch_pa;
+    unsigned int target_sva;
+    unsigned int tgt_desc_pa;
+    unsigned int tgt_desc;
+    unsigned int desc_sva;
+    unsigned int stack_sva;
+} g_l1;
+
+static int l1_resolve(void)
 {
-    log_hex_line("actlr set mask   ", set_mask);
-    log_hex_line("actlr clear mask ", clear_mask);
+    if (g_l1.resolved) return 0;
 
     unsigned int text_sva = 0;
     if (SPLx_TZS_GETMODSVA(SPLTZ_MODINFO_SYSMEM, 0, 0, &text_sva) < 0) {
         log_line("l1: GETMODSVA(SYSMEM,.text) failed");
-        return;
+        return -1;
     }
     if (tz_ns_init() < 0) {
         log_line("l1: psp2spl has no resolved TZ layout - aborting");
-        return;
+        return -1;
     }
     log_hex_line("l1 tz rst  ", g_tz_rst);
     log_hex_line("l1 tz len  ", g_tz_len);
@@ -945,13 +964,13 @@ static void apply_l1_actlr(unsigned int set_mask, unsigned int clear_mask)
     unsigned int scratch_pa = tz_find_scratch_pa();
     if (!scratch_pa) {
         log_line("l1: found no unmapped TZ page between mapped ones - aborting");
-        return;
+        return -1;
     }
     log_hex_line("l1 scratch pa ", scratch_pa);
     /* Independent cross-check of the bitmap scan, by the descriptor walk. */
     if (tz_pa_is_mapped(scratch_pa)) {
         log_line("l1: scratch PA is mapped after all - aborting");
-        return;
+        return -1;
     }
     log_line("l1: scratch page verified unmapped");
 
@@ -960,13 +979,13 @@ static void apply_l1_actlr(unsigned int set_mask, unsigned int clear_mask)
     unsigned int rx_desc_pa = 0, rx_desc = 0;
     if (ns_walk(text_sva + 0x14000u, &rx_desc_pa, &rx_desc) < 0 || !DESC_IS_SMALL(rx_desc)) {
         log_line("l1: could not read the R-X template descriptor");
-        return;
+        return -1;
     }
     unsigned int tpa = 0;
     if (SPLx_TZS_SVA2PA(text_sva + 0x14000u, &tpa) < 0 ||
         (rx_desc & 0xFFFFF000u) != (tpa & 0xFFFFF000u)) {
         log_line("l1: template descriptor disagrees with SVA2PA - aborting");
-        return;
+        return -1;
     }
     log_hex_line("l1 rx template desc ", rx_desc);
 
@@ -997,7 +1016,7 @@ static void apply_l1_actlr(unsigned int set_mask, unsigned int clear_mask)
     }
     if (!target_sva) {
         log_line("l1: no free slot in any secure L2 table - aborting");
-        return;
+        return -1;
     }
     log_hex_line("l1 target sva ", target_sva);
     log_hex_line("l1 target desc pa ", tgt_desc_pa);
@@ -1019,15 +1038,52 @@ static void apply_l1_actlr(unsigned int set_mask, unsigned int clear_mask)
     }
     if (!desc_sva) {
         log_line("l1: no writable secure VA maps the L2 table - aborting");
-        return;
+        return -1;
     }
     log_hex_line("l1 desc sva ", desc_sva);
 
     unsigned int sr = 0;
     if (SPLx_TZS_READ32(desc_sva, &sr) < 0 || sr != tgt_desc) {
         log_hex_line("l1: desc_sva cross-check failed, secure read ", sr);
-        return;
+        return -1;
     }
+
+    /* The secure-world scratch stack for the EXEC_WITH_SP trampoline. */
+    unsigned int stack_sva = 0;
+    if (SPLx_TZS_GETMODSVA(SPLTZ_MODINFO_INTRMGR, 1, 0, &stack_sva) < 0 || !stack_sva) {
+        log_line("l1: no INTRMGR .data for scratch sp - aborting");
+        return -1;
+    }
+    stack_sva += 0x200u;
+    log_hex_line("l1 scratch sp ", stack_sva);
+
+    g_l1.scratch_pa  = scratch_pa;
+    g_l1.target_sva  = target_sva;
+    g_l1.tgt_desc_pa = tgt_desc_pa;
+    g_l1.tgt_desc    = tgt_desc;
+    g_l1.desc_sva    = desc_sva;
+    g_l1.stack_sva   = stack_sva;
+    g_l1.resolved    = 1;
+    return 0;
+}
+
+/*
+ * Applies one ACTLR set/clear mask pair to all four cores, injecting the
+ * secure mapping, writing and verifying the stub, executing it, and then
+ * clearing the scratch page and restoring the descriptor. Safe to call
+ * repeatedly: nothing stays mapped across calls.
+ */
+static int apply_l1_actlr(unsigned int set_mask, unsigned int clear_mask)
+{
+    log_hex_line("actlr set mask   ", set_mask);
+    log_hex_line("actlr clear mask ", clear_mask);
+
+    if (l1_resolve() < 0) return -1;
+
+    unsigned int target_sva = g_l1.target_sva;
+    unsigned int desc_sva   = g_l1.desc_sva;
+    unsigned int tgt_desc   = g_l1.tgt_desc;
+    unsigned int stack_sva  = g_l1.stack_sva;
 
     /*
      * Map the scratch page Normal Non-Cacheable, PL1-RW and executable.
@@ -1037,7 +1093,7 @@ static void apply_l1_actlr(unsigned int set_mask, unsigned int clear_mask)
      * no cp15 maintenance is needed at all. Nothing else maps this page, so no
      * alias can be holding a stale line for it either.
      */
-    unsigned int new_desc = DESC_NC_RWX(scratch_pa);
+    unsigned int new_desc = DESC_NC_RWX(g_l1.scratch_pa);
     log_hex_line("l1 new desc ", new_desc);
     int wr = SPLx_TZS_WRITE32(desc_sva, new_desc);
     log_hex_line("l1 desc write ret ", (unsigned int)wr);
@@ -1078,34 +1134,28 @@ static void apply_l1_actlr(unsigned int set_mask, unsigned int clear_mask)
     if (visible) {
         log_line("l1: stub visible through the new secure mapping, executing per core");
         flush_log_to_disk();
-        unsigned int stack_sva = 0;
-        if (SPLx_TZS_GETMODSVA(SPLTZ_MODINFO_INTRMGR, 1, 0, &stack_sva) >= 0 && stack_sva) {
-            stack_sva += 0x200u;
-            log_hex_line("l1 scratch sp ", stack_sva);
-            static const int masks[4] = { 0x10000, 0x20000, 0x40000, 0x80000 };
-            unsigned int argp[4] = { target_sva, stack_sva,
-                                     set_mask, clear_mask };
-            for (int i = 0; i < 4; i++) {
-                SceUID th = ksceKernelCreateThread("pfe_actlr", run_actlr_core,
-                                                   0x10, 0x2000, 0, masks[i], NULL);
-                if (th < 0) { log_hex_line("l1: thread create failed ", (unsigned int)th); continue; }
-                int st = ksceKernelStartThread(th, sizeof(argp), argp);
-                if (st >= 0)
-                    ksceKernelWaitThreadEnd(th, NULL, NULL);
-                else
-                    log_hex_line("l1: thread start failed ", (unsigned int)st);
-                ksceKernelDeleteThread(th);
-                flush_log_to_disk();
-            }
-            log_hex_line("l1 cores with the requested ACTLR bits, of 4: ",
-                         (unsigned int)g_actlr_ok);
-            if (g_actlr_ok == 4)
-                log_line("actlr: requested bits APPLIED on all cores");
+        log_hex_line("l1 scratch sp ", stack_sva);
+        static const int masks[4] = { 0x10000, 0x20000, 0x40000, 0x80000 };
+        unsigned int argp[4] = { target_sva, stack_sva, set_mask, clear_mask };
+        g_actlr_ok = 0;
+        for (int i = 0; i < 4; i++) {
+            SceUID th = ksceKernelCreateThread("pfe_actlr", run_actlr_core,
+                                               0x10, 0x2000, 0, masks[i], NULL);
+            if (th < 0) { log_hex_line("l1: thread create failed ", (unsigned int)th); continue; }
+            int st = ksceKernelStartThread(th, sizeof(argp), argp);
+            if (st >= 0)
+                ksceKernelWaitThreadEnd(th, NULL, NULL);
             else
-                log_line("actlr: NOT fully applied - see the per-core lines");
-        } else {
-            log_line("l1: no INTRMGR .data for scratch sp - not executing");
+                log_hex_line("l1: thread start failed ", (unsigned int)st);
+            ksceKernelDeleteThread(th);
+            flush_log_to_disk();
         }
+        log_hex_line("l1 cores with the requested ACTLR bits, of 4: ",
+                     (unsigned int)g_actlr_ok);
+        if (g_actlr_ok == 4)
+            log_line("actlr: requested bits APPLIED on all cores");
+        else
+            log_line("actlr: NOT fully applied - see the per-core lines");
     } else {
         log_line("l1: stub NOT visible from secure world - NOT executing (clean abort)");
     }
@@ -1115,6 +1165,167 @@ static void apply_l1_actlr(unsigned int set_mask, unsigned int clear_mask)
         SPLx_TZS_WRITE32(target_sva + i * 4u, 0);
     SPLx_TZS_WRITE32(desc_sva, tgt_desc);
     log_line("l1: scratch cleared, secure mapping removed");
+    return (visible && g_actlr_ok == 4) ? 0 : -1;
+}
+
+#define PL310_PREFETCH_OFFSET   0x1Fu
+
+/*
+ * Secure read-modify-write of PL310 PREFETCH_CTRL: clears `clear`, then sets
+ * `set`. PL310 is MMIO, not a cp15 register, so no code execution is needed.
+ *
+ * PL310_PREFETCH_CTRL_SVA is only valid because the 0x1A000000 MMIO section is
+ * identity-mapped in the secure tables. That has held on every layout seen so
+ * far, but it is an assumption about the firmware's own page tables, so it is
+ * checked: if the VA resolves to a different PA, or to nothing, a blind secure
+ * write would land somewhere unknown. Returns 0 on success, negative (and
+ * writes nothing) otherwise.
+ */
+static int pl310_prefetch_rmw(unsigned int clear, unsigned int set,
+                              unsigned int *out_before, unsigned int *out_after)
+{
+    static int identity_ok;
+    if (!identity_ok) {
+        unsigned int pa = 0;
+        int pr = SPLx_TZS_SVA2PA(PL310_PREFETCH_CTRL_SVA, &pa);
+        log_hex_line("l2 prefetch_ctrl sva->pa ", pa);
+        if (pr < 0 || pa != PL310_PREFETCH_CTRL_SVA) {
+            log_line("l2: PREFETCH_CTRL is not identity-mapped - not touching it");
+            return -1;
+        }
+        identity_ok = 1;
+    }
+
+    unsigned int before = 0;
+    if (SPLx_TZS_READ32(PL310_PREFETCH_CTRL_SVA, &before) < 0) {
+        log_line("l2: secure read of PREFETCH_CTRL failed - not writing");
+        return -2;
+    }
+    unsigned int want = (before & ~clear) | set;
+    int rw = SPLx_TZS_WRITE32(PL310_PREFETCH_CTRL_SVA, want);
+    unsigned int after = before;
+    SPLx_TZS_READ32(PL310_PREFETCH_CTRL_SVA, &after);
+    log_hex_line("l2 prefetch_ctrl before ", before);
+    log_hex_line("l2 prefetch_ctrl after  ", after);
+    if (out_before) *out_before = before;
+    if (out_after)  *out_after  = after;
+    if (rw < 0 || after != want) {
+        log_hex_line("l2: write did not take, wanted ", want);
+        return -3;
+    }
+    return 0;
+}
+
+/*
+ * The benchmark suite. Every leg fully specifies ACTLR bits 1, 2 and 8 and
+ * PL310 data prefetch plus the prefetch offset, so no leg depends on the one
+ * before it, and the first leg is repeated last to expose drift (a clock
+ * change, thermal throttling) between the two ends of the run.
+ *
+ * PL310 prefetch offset 23 is deliberately absent: ARM errata 765569 - the
+ * prefetcher can cross a 4 KB boundary with that value - and the Vita's
+ * r3p1-50rel0 part predates the fix. Double linefill is likewise never set
+ * (errata 752271, see the analysis README).
+ */
+struct bench_leg {
+    const char  *name;
+    unsigned int actlr_set, actlr_clear;
+    unsigned int pctl;          /* PL310 data-prefetch bit and offset field */
+};
+
+#define B_AOW ACTLR_ALLOC_ONE_WAY
+#define B_PF  ACTLR_PREFETCH_BITS
+#define B_DPF PL310_DATA_PREFETCH_EN
+#define B_PCTL_OWNED (PL310_DATA_PREFETCH_EN | PL310_PREFETCH_OFFSET)
+
+static const struct bench_leg g_legs[] = {
+    { "base",          B_AOW,        B_PF,         0 },
+    { "aow_off",       0,            B_AOW | B_PF, 0 },
+    { "l1pf",          B_AOW | B_PF, 0,            0 },
+    { "l2pf_o0",       B_AOW,        B_PF,         B_DPF | 0 },
+    { "l1l2_o0",       B_AOW | B_PF, 0,            B_DPF | 0 },
+    { "l1l2_o7",       B_AOW | B_PF, 0,            B_DPF | 7 },
+    { "l1l2_o15",      B_AOW | B_PF, 0,            B_DPF | 15 },
+    { "l1l2_o31",      B_AOW | B_PF, 0,            B_DPF | 31 },
+    { "l1l2_o0_aowoff", B_PF,        B_AOW,        B_DPF | 0 },
+    { "base_again",    B_AOW,        B_PF,         0 },
+};
+
+static void log_bench_res(const char *kind, unsigned int param,
+                          const struct pfe_bench_res *r)
+{
+    char line[96];
+    snprintf(line, sizeof(line), "bench %s %X cyc %X us %X n %X",
+             kind, param, r->cycles, r->us, r->accesses);
+    log_line(line);
+}
+
+/* Runs on one pinned core, so the PMU cycle counter is coherent. */
+static int bench_leg_thread(SceSize args, void *argp)
+{
+    (void)args; (void)argp;
+    pfe_bench_pmu_enable();
+    struct pfe_bench_res r;
+    for (int i = 0; i < PFE_BENCH_WS_COUNT; i++) {
+        pfe_bench_chase(pfe_bench_ws_bytes[i], &r);
+        log_bench_res("chase", pfe_bench_ws_bytes[i], &r);
+    }
+    for (int i = 0; i < PFE_BENCH_STRIDE_COUNT; i++) {
+        pfe_bench_stride(pfe_bench_strides[i], &r);
+        log_bench_res("stride", pfe_bench_strides[i], &r);
+    }
+    return 0;
+}
+
+static void run_bench_suite(void)
+{
+    unsigned int orig_actlr = 0, orig_pctl = 0;
+    __asm__ __volatile__("mrc p15, 0, %0, c1, c0, 1" : "=r"(orig_actlr));
+    log_hex_line("bench: original actlr ", orig_actlr);
+
+    int br = pfe_bench_init();
+    if (br < 0) {
+        log_hex_line("bench: buffer allocation failed ", (unsigned int)br);
+        return;
+    }
+    if (pl310_prefetch_rmw(0, 0, &orig_pctl, NULL) < 0) {
+        log_line("bench: cannot read PL310 PREFETCH_CTRL - not running");
+        pfe_bench_fini();
+        return;
+    }
+    flush_log_to_disk();
+
+    for (unsigned int i = 0; i < sizeof(g_legs) / sizeof(g_legs[0]); i++) {
+        const struct bench_leg *L = &g_legs[i];
+        char line[64];
+        snprintf(line, sizeof(line), "bench leg %s", L->name);
+        log_line(line);
+        if (apply_l1_actlr(L->actlr_set, L->actlr_clear) < 0) {
+            log_line("bench: ACTLR leg setup failed - stopping the suite");
+            break;
+        }
+        if (pl310_prefetch_rmw(B_PCTL_OWNED, L->pctl, NULL, NULL) < 0) {
+            log_line("bench: PL310 leg setup failed - stopping the suite");
+            break;
+        }
+        flush_log_to_disk();
+
+        SceUID th = ksceKernelCreateThread("pfe_bench", bench_leg_thread,
+                                           0x10, 0x4000, 0, 0x10000, NULL);
+        if (th < 0) { log_hex_line("bench: thread create failed ", (unsigned int)th); break; }
+        if (ksceKernelStartThread(th, 0, NULL) >= 0)
+            ksceKernelWaitThreadEnd(th, NULL, NULL);
+        ksceKernelDeleteThread(th);
+        log_line("bench leg end");
+        flush_log_to_disk();
+    }
+
+    /* Put back exactly what the firmware had. */
+    log_line("bench: restoring firmware ACTLR and PL310 state");
+    apply_l1_actlr(orig_actlr & (B_AOW | B_PF), ~orig_actlr & (B_AOW | B_PF));
+    pl310_prefetch_rmw(B_PCTL_OWNED, orig_pctl & B_PCTL_OWNED, NULL, NULL);
+    pfe_bench_fini();
+    log_line("bench: done");
 }
 
 int module_start(SceSize argc, const void *args)
@@ -1153,7 +1364,9 @@ int module_start(SceSize argc, const void *args)
     int want_l2 = cfg.want_l2;
     int probe_only = cfg.probe_only;
 
-    if (!want_actlr && !want_l2 && !probe_only) {
+    int bench = cfg.bench;
+
+    if (!want_actlr && !want_l2 && !probe_only && !bench) {
         log_line("nothing to enable, exiting cleanly");
         goto write_out;
     }
@@ -1178,52 +1391,27 @@ int module_start(SceSize argc, const void *args)
         goto write_out;
     }
 
+    if (bench) {
+        /* The suite sets every leg itself and restores the firmware state
+         * afterwards, so the l1/l2/alloc keys are ignored in this mode. */
+        log_line("bench=on: running the benchmark suite, other keys ignored");
+        run_bench_suite();
+        probe_cpu_regs();
+        goto write_out;
+    }
+
     if (want_actlr) {
         apply_l1_actlr(actlr_set_mask, actlr_clear_mask);
         flush_log_to_disk();
     }
 
     if (want_l2) {
-        /*
-         * PL310 is MMIO, not a cp15 register, so no code execution is needed:
-         * flip PREFETCH_CTRL bit 28 with a secure read-modify-write. tzs_*32
-         * are already exercised successfully during SPLx_TZS_INIT above.
-         */
-        /*
-         * PL310_PREFETCH_CTRL_SVA is only valid because the 0x1A000000 MMIO
-         * section is identity-mapped in the secure tables. That has held on
-         * every layout seen so far, but it is an assumption about the
-         * firmware's own page tables, so check it: if the VA resolves to a
-         * different PA, or to nothing, a blind secure write would land
-         * somewhere unknown. Abort instead.
-         */
-        unsigned int pl310_pa = 0;
-        int pr = SPLx_TZS_SVA2PA(PL310_PREFETCH_CTRL_SVA, &pl310_pa);
-        log_hex_line("l2 prefetch_ctrl sva->pa ", pl310_pa);
-        if (pr < 0 || pl310_pa != PL310_PREFETCH_CTRL_SVA) {
-            log_line("l2_prefetch: PREFETCH_CTRL is not identity-mapped - aborting L2");
-            goto l2_done;
-        }
-
-        unsigned int before = 0;
-        int rr = SPLx_TZS_READ32(PL310_PREFETCH_CTRL_SVA, &before);
-        log_hex_line("l2 read32 ret ", (unsigned int)rr);
-        if (rr < 0) {
-            log_line("l2_prefetch: secure read of PREFETCH_CTRL failed - aborting L2");
-        } else {
-            log_hex_line("l2 prefetch_ctrl before ", before);
-            int rw = SPLx_TZS_WRITE32(PL310_PREFETCH_CTRL_SVA,
-                                      before | PL310_DATA_PREFETCH_EN);
-            log_hex_line("l2 write32 ret ", (unsigned int)rw);
-            unsigned int after = before;
-            SPLx_TZS_READ32(PL310_PREFETCH_CTRL_SVA, &after);
-            log_hex_line("l2 prefetch_ctrl after ", after);
-            if (after & PL310_DATA_PREFETCH_EN)
-                log_line("l2_prefetch: PL310 data prefetch ENABLED");
-            else
-                log_line("l2_prefetch: bit did not stick (write ignored?)");
-        }
-    l2_done:
+        unsigned int before = 0, after = 0;
+        if (pl310_prefetch_rmw(0, PL310_DATA_PREFETCH_EN, &before, &after) == 0 &&
+            (after & PL310_DATA_PREFETCH_EN))
+            log_line("l2_prefetch: PL310 data prefetch ENABLED");
+        else
+            log_line("l2_prefetch: NOT enabled - see the lines above");
         flush_log_to_disk();
     }
 

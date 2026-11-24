@@ -22,6 +22,7 @@ struct pfe_config {
     int want_l2;        /* l2_prefetch:   PL310 PREFETCH_CTRL bit 28 */
     int probe_only;     /* probe_only:    read-only recon, no secure writes */
     int alloc_one_way;  /* actlr_alloc_one_way: ACTLR bit 8, enum pfe_tri */
+    int bench;          /* bench:         run the memory benchmark suite */
 };
 
 /*
