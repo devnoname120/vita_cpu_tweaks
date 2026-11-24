@@ -327,6 +327,19 @@ That splits the two knobs:
   the tester config as shipped (`probe = once`), probed read-only and
   switched itself off.
 
+* **Surviving sleep (boot 58).** A sleep loses everything: right after wake
+  all four cores read ACTLR `0x149` and PL310 `PREFETCH_CTRL` reads
+  `0x21000000`, Sony's values. psp2spl's module documents why ("at
+  sleep-resume cmep & tzsmods are reset") and reinstalls itself on wake;
+  the plugin now follows the same protocol - `SPLx_CFK_DEINIT` +
+  `SPLx_CFK_USSMALLOC` on sysevent `0x20F` (sleep), and on `0x100000`
+  (wake) a worker thread re-initialises with `SPL_IFL(_RESET)`, re-resolves
+  the secure layout and re-applies the masks. Boot 58, one sleep/wake:
+  re-init returned `0x5`, ACTLR `0x149 -> 0x14B` on all four cores, PL310
+  `0x21000000 -> 0x3100000F`, no crash dump. The secure layout (scratch
+  page, stub slot, descriptor window, scratch sp) came back identical, but
+  it is re-resolved on every wake anyway since nothing guarantees that.
+
   The rest of this bullet is the record of how the dead ends were eliminated.
 
 * **L1 / ACTLR - the dead ends, and why the devkit's technique does not port.**

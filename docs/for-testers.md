@@ -102,9 +102,9 @@ Lines worth a quick look yourself:
 
 ## Expected caveats
 
-- The settings are re-applied after waking from sleep. That wake path is
-  new and not yet verified on hardware: if a wake ever hangs, hold the
-  power button to force the Vita off and send the log.
+- The settings are re-applied after every wake from sleep (a sleep resets
+  them). The log gets a `==== resume` section each time. If a wake ever
+  hangs, hold the power button to force the Vita off and send the log.
 - The benefit is for strided or streaming memory access: on the 3.60 test
   unit at 500 MHz, 60-66% fewer cycles per load at 4-16 byte strides,
   about 50% at 32-64 bytes, falling to 17% at 512. Random pointer-chasing

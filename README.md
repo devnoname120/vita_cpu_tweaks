@@ -54,9 +54,10 @@ safety net: if it ever hung, it would hang on every boot until the plugin's
 line is removed from `config.txt`.
 
 Waking from sleep: the secure world resets the cores and the L2 controller
-on wake, so the plugin re-applies the settings after every wake, following
-psp2spl's own sleep/resume protocol (tear down before sleep, re-initialise
-with `RESET` on wake). **This wake path is not yet verified on hardware.**
+on wake (verified: right after wake ACTLR reads `0x149` and PL310
+`0x21000000` again), so the plugin re-applies the settings after every
+wake, following psp2spl's own sleep/resume protocol (tear down before
+sleep, re-initialise with `RESET` on wake). Verified on retail 3.60.
 
 ## Why bother
 
