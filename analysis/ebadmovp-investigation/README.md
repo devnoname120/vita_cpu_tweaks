@@ -334,7 +334,7 @@ That splits the two knobs:
   the plugin now follows the same protocol - `SPLx_CFK_DEINIT` +
   `SPLx_CFK_USSMALLOC` on sysevent `0x20F` (sleep), and on `0x100000`
   (wake) a worker thread re-initialises with `SPL_IFL(_RESET)`, re-resolves
-  the secure layout and re-applies the masks. Boot 58, one sleep/wake:
+  the secure layout and re-applies the masks. Boot 58, three sleep/wake cycles in a row, each identical:
   re-init returned `0x5`, ACTLR `0x149 -> 0x14B` on all four cores, PL310
   `0x21000000 -> 0x3100000F`, no crash dump. The secure layout (scratch
   page, stub slot, descriptor window, scratch sp) came back identical, but
