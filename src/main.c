@@ -214,14 +214,27 @@ static int kprintf_capture_handler(int unk, const char *format, va_list args)
                                 * which would re-enter this handler. */
         }
 
-        /* A +/-0x80 window around the failing offset found no MOVW/MOVT
-         * pair at all; a later +/-0x800 window found exactly one
-         * plausible candidate (text+0x1488), which tested HUNG on
-         * hardware - see feedback-security-check-bypass-risk memory.
-         * Widen the net instead of guessing again: dump a fixed 8KB
-         * block from .text's own base, covering ground neither prior
-         * window reached, so a static scan has more to work with before
-         * any further live test is even considered. */
+        /* A +/-0x80 window, then a +/-0x800 window, then a flat 8KB dump
+         * from .text's own base (text+0x0-0x2000) found six corroborating
+         * reload sites (all under text+0x1488) that decode to the same
+         * candidate, 0x002120E4 (text-relative 0x120E4) - but that's past
+         * every window dumped so far, so none of this ever looked at the
+         * candidate's own target address directly.
+         *
+         * Tried aiming this exact window at text+0x11000 (to land near
+         * 0x120E4) and it came back BYTE-IDENTICAL to the text+0x0 dump,
+         * across two independent reboots, despite the built .skprx
+         * (verified byte-identical on-device both times, and confirmed via
+         * disassembly to compute win_start = text_base+0x11000 correctly).
+         * Conclusion: SPLx_TZS_SVA2NSVA's translation can't be trusted far
+         * from the one SVA this path has ever successfully resolved
+         * (text_base itself) - it silently aliases back to that same
+         * window instead of erroring, rather than genuinely translating an
+         * arbitrary offset. Don't retry this by just picking a different
+         * offset; it needs its own investigation (or SKGleba's input on
+         * SVA2NSVA's real valid range) before it can tell us anything about
+         * memory this far from .text's base. Left at the one window this
+         * mechanism has actually proven to read correctly. */
         unsigned int win_start = text_base;
         unsigned int win_len   = 0x2000u;
 
