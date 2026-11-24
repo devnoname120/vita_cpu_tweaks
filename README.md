@@ -3,7 +3,7 @@
 A taiHEN kernel plugin that turns on the PS Vita's hardware data
 prefetchers. The firmware switches them off at every boot: the Cortex-A9's
 L2 prefetch hint and the PL310 L2 cache controller's data prefetch. With
-them on, memory reads that miss the cache get up to 2.5× faster. Every
+them on, memory reads that miss the cache get up to 3× faster. Every
 prefetch-related register field has its own key in a plain INI config file,
 so you never need to rebuild anything.
 
