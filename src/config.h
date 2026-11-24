@@ -72,7 +72,7 @@ void pfe_config_masks(const struct pfe_config *cfg, struct pfe_masks *m);
 int pfe_l2_offset_valid(int v);
 
 /*
- * Parses `n` bytes of `key = value` lines from ur0:data/prefetch_enabler.txt.
+ * Parses `n` bytes of `key = value` lines from ur0:data/prefetch_enabler.ini.
  *
  * Agnostic to line endings (LF, CRLF and bare CR all work), to a leading
  * UTF-8 BOM, to leading/trailing spaces and tabs around both key and value,

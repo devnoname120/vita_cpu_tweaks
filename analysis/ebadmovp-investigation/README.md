@@ -214,6 +214,65 @@ That splits the two knobs:
   the crash. The normal apply path takes well under a second, which is why
   boots 26-32 never hit this; keep it that way.
 
+* **Per-field config and game-clock benchmarks (boots 37-42).** The config
+  became 13 INI-style keys, one per register field (`prefetch_enabler.example.ini`).
+  Things learned on the way:
+
+  * **Config size guard fired (boot 37, first try).** The new example is
+    4663 bytes with CRLF, over the old 4 KiB buffer; the plugin logged
+    `FILE TOO LARGE` and did nothing, as designed. Buffer is now 16 KiB and
+    a host test checks the example fits as CRLF.
+  * **Kernel panic from a wrong power-API signature (boot 38,
+    `captures/boot38_kpanic`).** On 3.60 the kernel GPU clock calls are the
+    old ES4 pair: `kscePowerGetGpuClockFrequencyInternal(int *a, int *b)`
+    and `...SetGpuClockFrequencyInternal(int a, int b)`. Called with no
+    arguments the getter wrote through a garbage pointer (data abort at
+    `0xDE`). `kscePowerSetGpuClockFrequency` (NID `0x717DB06C`) is not
+    exported to kernel code on 3.60 at all, despite vita-headers' db.
+  * **A one-off clock set does not hold (boot 39).** 500 MHz was set, but
+    the per-leg measured clock read ~406 then ~330: something (PSVshell or
+    ScePower reapplying the shell's request) puts it back within seconds.
+    The bench now re-asserts the clocks before every individual test, and
+    `tools/bench_table.py LOG 500` drops any test measured >3% off target.
+    Boots 40-41: every leg at 493-498 MHz. The GPU core clock stays at
+    41 MHz with the GPU idle; irrelevant to a CPU-side test.
+  * **Boot can't be held for a cleaner run.** Doing the suite inside
+    `module_start` crashes SceShell (boots 33-34, above), so it runs at the
+    home screen. With clocks held and 3 interleaved rounds (boot 41) the
+    best two of three agree to a median 0.2%, 90th percentile 2.3%. The one
+    exception is the 2 MiB random chase, purely DRAM-bound and sharing DRAM
+    with the running system: it swings 47-83 cycles between legs with
+    identical settings, so no conclusion is drawn from that column.
+
+  Results at 500 MHz (boot 41, `captures/boot41_bench500_table.txt`; boot
+  40 agrees), stride walk, cycles per load:
+
+  | leg | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 |
+  |---|---|---|---|---|---|---|---|---|
+  | stock | 17.9 | 32.0 | 38.2 | 49.6 | 49.5 | 49.2 | 50.0 | 51.4 |
+  | ACTLR bit 2 only (dside) | 18.1 | 32.7 | 38.9 | 49.1 | 49.6 | 49.0 | 50.0 | 51.3 |
+  | ACTLR bit 1 only (hint) | 10.3 | 19.0 | 21.9 | 37.9 | 38.3 | 39.9 | 41.9 | 46.2 |
+  | ACTLR bits 1+2 | 10.5 | 19.0 | 22.2 | 37.7 | 38.0 | 39.5 | 42.0 | 45.6 |
+  | PL310 o15 only | 7.3 | 11.5 | 15.3 | 21.6 | 21.4 | 28.2 | 36.7 | 44.9 |
+  | bit 2 + PL310 o15 | 7.6 | 11.6 | 15.7 | 21.6 | 20.9 | 28.2 | 37.2 | 44.7 |
+  | bits 1+2 + PL310 o0 | 10.4 | 19.0 | 23.1 | 37.9 | 43.3 | 44.9 | 46.9 | 48.4 |
+  | bits 1+2 + PL310 o7 | 6.3 | 9.6 | 15.3 | 21.3 | 28.2 | 36.9 | 39.1 | 46.4 |
+  | bits 1+2 + PL310 o15 | 6.7 | 10.3 | 15.4 | 22.9 | 24.3 | 28.3 | 37.2 | 41.4 |
+  | bits 1+2 + PL310 o31 | 7.1 | 11.5 | 16.1 | 26.2 | 25.3 | 25.7 | 30.4 | 38.9 |
+  | same as o15, prefetch drop off | 6.5 | 10.1 | 14.8 | 22.9 | 23.3 | 28.1 | 37.3 | 41.6 |
+
+  * **ACTLR bit 2 (L1 D-side prefetch) does nothing on this chip**, alone or
+    combined. **Bit 1 (L2 prefetch hint) carries the whole A9-side gain.**
+    The example config therefore sets bit 1 and leaves bit 2 at the
+    firmware's 0: boot 42 verified `0x149 -> 0x14B` on all four cores,
+    PL310 `0x21000000 -> 0x3100000F`.
+  * At 500 MHz PL310 offset 15 is strong even without the hint; the hint
+    adds ~10% at strides 4-8 and at 512 and costs ~6-14% at 32-64. Offset 7
+    wins below 16 bytes, 31 above 128; 15 is the all-rounder. Prefetch drop
+    makes no measurable difference.
+  * Absolute numbers are higher in cycles than at ~330 MHz (boots 33-35)
+    because DRAM latency is fixed in nanoseconds; the ranking is the same.
+
   The rest of this bullet is the record of how the dead ends were eliminated.
 
 * **L1 / ACTLR - the dead ends, and why the devkit's technique does not port.**

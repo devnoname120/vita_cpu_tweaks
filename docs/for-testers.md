@@ -41,9 +41,9 @@ than running without that safety net.
 
 1. Copy `prefetch_enabler.skprx` to `ur0:tai/`. Keep the filename — the
    self-disable looks for a line containing `prefetch_enabler.skprx`.
-2. Copy `prefetch_enabler.txt` to `ur0:data/`. Editing it on Windows is
-   fine — LF, CRLF and bare CR line endings all work, and a UTF-8 BOM is
-   ignored.
+2. Copy `prefetch_enabler.ini` to `ur0:data/`. It's INI-style so editors
+   highlight it. Editing it on Windows is fine — LF, CRLF and bare CR line
+   endings all work, and a UTF-8 BOM is ignored.
 3. Add to `ur0:tai/config.txt`, under the `*KERNEL` section:
 
    ```
@@ -57,28 +57,28 @@ than running without that safety net.
 
 ## Please go up this ladder, one reboot at a time
 
-`ur0:data/prefetch_enabler.txt` ships set to step 1. After each boot, read
-`ur0:data/prefetch_enabler.log`, then re-enable the config.txt line and
-move to the next step.
+`ur0:data/prefetch_enabler.ini` ships set to step 1. After each boot, read
+`ur0:data/prefetch_enabler.log`, then re-enable the config.txt line, change
+`mode`, and reboot for the next step.
 
-1. **`probe_only=on`** (as shipped). Read-only: dumps your secure page-table
+1. **`mode = probe`** (as shipped). Read-only: dumps your secure page-table
    layout and makes no secure writes whatsoever. This is the most useful
    step to send back — it says whether the rest would even work on your
    firmware. The log will be large; that's expected.
-2. **`probe_only=off`, `l2_prefetch=on`**. One secure MMIO write, no code
-   execution. Expect `l2_prefetch: PL310 data prefetch ENABLED` and
-   `prefetch_ctrl before 0x21000000` / `after 0x3100000F` (data prefetch on,
-   `l2_prefetch_offset=15`).
-3. **also `l1_prefetch=on`**. The involved one: it injects a page-table
-   descriptor to get a secure-executable scratch page, runs a 9-word stub on
-   each core, then cleans up after itself. Expect
-   `actlr: requested bits APPLIED on all cores` and
-   `actlr before 0x149 / actlr after 0x14F` four times.
-4. **`bench=on`** (the other keys are ignored in this mode). Boots normally;
-   30 seconds after boot it runs a ~10 second memory benchmark across the
-   prefetch settings, then puts the firmware's settings back. Leave the Vita
-   on the home screen for a minute, then send the log - it ends with
-   `bench done`. This tells us whether the speed-up holds on your unit too.
+2. **`mode = apply`**. Sets the PL310 fields with one secure MMIO write, and
+   the ACTLR bit by injecting a page-table descriptor to get a
+   secure-executable scratch page, running a 9-word stub on each core, then
+   cleaning up after itself. Expect `actlr before 0x149` / `after 0x14B`
+   four times, `actlr: requested bits APPLIED on all cores`,
+   `prefetch_ctrl before 0x21000000` / `after 0x3100000F` and
+   `pl310: requested fields APPLIED`.
+3. **`mode = bench`**. Boots normally; 30 seconds after boot it raises the
+   clocks to game levels (CPU 500 MHz) and runs a memory benchmark across
+   the prefetch settings for about 40 seconds, then puts the firmware's
+   settings and clocks back. Leave the Vita on the home screen for two
+   minutes, then send the log - it ends with `bench done`. This tells us
+   whether the speed-up holds on your unit too. 500 MHz needs a clock
+   plugin such as PSVshell; without one it runs at 444 and says so.
 
 Every step is gated: if anything about your layout doesn't match what the
 code expects, it logs a reason and aborts instead of guessing. An abort is

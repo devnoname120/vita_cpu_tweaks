@@ -180,8 +180,8 @@ int main(void)
 
     /* The shipped example file must actually parse, every line recognised. */
     {
-        FILE *f = fopen("prefetch_enabler.txt.example", "rb");
-        if (!f) f = fopen("../prefetch_enabler.txt.example", "rb");
+        FILE *f = fopen("prefetch_enabler.example.ini", "rb");
+        if (!f) f = fopen("../prefetch_enabler.example.ini", "rb");
         if (!f) {
             printf("FAIL %-48s cannot open example config\n", "example file");
             failures++;
@@ -198,8 +198,8 @@ int main(void)
             expect("example: mode off as shipped", c.mode, PFE_MODE_OFF);
             expect("example: self_disable on", c.self_disable, 1);
             pfe_config_masks(&c, &m);
-            expect_hex("example: ACTLR 0x149 -> 0x14F if applied",
-                       (0x149u & ~m.actlr_clear) | m.actlr_set, 0x14F);
+            expect_hex("example: ACTLR 0x149 -> 0x14B if applied",
+                       (0x149u & ~m.actlr_clear) | m.actlr_set, 0x14B);
             expect_hex("example: PL310 -> 0x3100000F if applied",
                        (0x21000000u & ~m.pl310_clear) | m.pl310_set, 0x3100000F);
         }

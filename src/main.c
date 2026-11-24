@@ -6,7 +6,7 @@
  * prefetchers at boot. This plugin re-enables either or both, every cold
  * boot, controlled by a plain text config file:
  *
- *     ur0:data/prefetch_enabler.txt
+ *     ur0:data/prefetch_enabler.ini
  *
  *     # l1_prefetch: Cortex-A9 ACTLR L1 D-side prefetch + L2 prefetch hint (bits 2:1)
  *     # l2_prefetch: ARM PL310 L2C-310 data prefetch (PREFETCH_CTRL bit 28) -- on/off
@@ -65,7 +65,7 @@ void *memset(void *dst, int c, unsigned int n)
     return dst;
 }
 
-#define CONFIG_PATH "ur0:data/prefetch_enabler.txt"
+#define CONFIG_PATH "ur0:data/prefetch_enabler.ini"
 #define LOG_PATH    "ur0:data/prefetch_enabler.log"
 #define HOST_LOG    "host0:prefetch_enabler/boot.log"
 
@@ -1266,6 +1266,7 @@ struct bench_leg {
 static const struct bench_leg g_legs[] = {
     { "base",            B_AOW,           B_PF,   B_DROP },
     { "dside",           B_AOW | B_DSIDE, B_HINT, B_DROP },
+    { "hint",            B_AOW | B_HINT,  B_DSIDE, B_DROP },
     { "l1pf",            B_AOW | B_PF,    0,      B_DROP },
     { "l2_o15",          B_AOW,           B_PF,   B_DROP | B_DPF | 15 },
     { "dside_l2_o15",    B_AOW | B_DSIDE, B_HINT, B_DROP | B_DPF | 15 },
@@ -1279,7 +1280,7 @@ static const struct bench_leg g_legs[] = {
 
 /* Every leg twice, interleaved, so slow drift and one-off noise show up as
  * disagreement between rounds instead of as a difference between legs. */
-#define BENCH_ROUNDS 2
+#define BENCH_ROUNDS 3
 
 static void log_bench_res(const char *kind, unsigned int param,
                           const struct pfe_bench_res *r)
@@ -1290,6 +1291,15 @@ static void log_bench_res(const char *kind, unsigned int param,
     log_line(line);
 }
 
+/*
+ * Re-applied before every individual test when bench.clocks=max. A one-off
+ * set does not hold: boot 39 set 500 MHz and the per-leg clock read back
+ * ~406 for the first legs and ~330 for the rest - something (PSVshell or
+ * ScePower reapplying the shell's request) puts it back within seconds.
+ */
+static int g_bench_hold_clocks;
+static void clocks_max(void);
+
 /* Runs on one pinned core, so the PMU cycle counter is coherent. */
 static int bench_leg_thread(SceSize args, void *argp)
 {
@@ -1297,10 +1307,12 @@ static int bench_leg_thread(SceSize args, void *argp)
     pfe_bench_pmu_enable();
     struct pfe_bench_res r;
     for (int i = 0; i < PFE_BENCH_WS_COUNT; i++) {
+        if (g_bench_hold_clocks) clocks_max();
         pfe_bench_chase(pfe_bench_ws_bytes[i], &r);
         log_bench_res("chase", pfe_bench_ws_bytes[i], &r);
     }
     for (int i = 0; i < PFE_BENCH_STRIDE_COUNT; i++) {
+        if (g_bench_hold_clocks) clocks_max();
         pfe_bench_stride(pfe_bench_strides[i], &r);
         log_bench_res("stride", pfe_bench_strides[i], &r);
     }
@@ -1313,18 +1325,35 @@ static int bench_leg_thread(SceSize args, void *argp)
  * plugin (PSVshell turns a 500 request into 444 x 16/15); without one the
  * setter refuses it and 444 is used instead. Each leg logs the clock it
  * actually ran at (cycles / microseconds), so this is checked, not assumed.
+ *
+ * GPU: on 3.60 kernel code only has the older "ES4" pair, which take two
+ * values (one per GPU core) - the getter through pointers. vitasdk names them
+ * ...Internal. kscePowerSetGpuClockFrequency (NID 0x717DB06C) is not exported
+ * to kernel code on this firmware, and calling the getter with no arguments
+ * made it write through a garbage pointer: a kernel data abort at 0xDE
+ * (boot 38, captures/boot38_kpanic). PSVshell uses this same pair.
  */
-extern int kscePowerGetGpuClockFrequencyInternal(void);
+extern int kscePowerGetGpuClockFrequencyInternal(int *core_a, int *core_b);
+extern int kscePowerSetGpuClockFrequencyInternal(int core_a, int core_b);
 
-struct clocks { int arm, bus, gpu, xbar; };
+struct clocks { int arm, bus, gpu_a, gpu_b, xbar; };
+
+static void clocks_read(struct clocks *c)
+{
+    c->gpu_a = c->gpu_b = -1;
+    c->arm  = kscePowerGetArmClockFrequency();
+    c->bus  = kscePowerGetBusClockFrequency();
+    kscePowerGetGpuClockFrequencyInternal(&c->gpu_a, &c->gpu_b);
+    c->xbar = kscePowerGetGpuXbarClockFrequency();
+}
 
 static void log_clocks(const char *what)
 {
+    struct clocks c;
+    clocks_read(&c);
     char line[96];
-    snprintf(line, sizeof(line), "bench clocks %s: arm %d bus %d gpu %d xbar %d", what,
-             kscePowerGetArmClockFrequency(), kscePowerGetBusClockFrequency(),
-             kscePowerGetGpuClockFrequencyInternal(),
-             kscePowerGetGpuXbarClockFrequency());
+    snprintf(line, sizeof(line), "bench clocks %s: arm %d bus %d gpu %d/%d xbar %d",
+             what, c.arm, c.bus, c.gpu_a, c.gpu_b, c.xbar);
     log_line(line);
 }
 
@@ -1333,23 +1362,18 @@ static int gpu_clock_valid(int f)
     return f == 41 || f == 55 || f == 83 || f == 111 || f == 166 || f == 222;
 }
 
-static void clocks_save(struct clocks *c)
-{
-    c->arm  = kscePowerGetArmClockFrequency();
-    c->bus  = kscePowerGetBusClockFrequency();
-    c->gpu  = kscePowerGetGpuClockFrequencyInternal();
-    c->xbar = kscePowerGetGpuXbarClockFrequency();
-}
-
 static void clocks_max(void)
 {
-    int r = kscePowerSetArmClockFrequency(500);
+    static int refused;
+    int r = refused ? -1 : kscePowerSetArmClockFrequency(500);
     if (r < 0) {
-        log_hex_line("bench: arm 500 refused, using 444: ", (unsigned int)r);
+        if (!refused)
+            log_hex_line("bench: arm 500 refused, using 444: ", (unsigned int)r);
+        refused = 1;
         kscePowerSetArmClockFrequency(444);
     }
     kscePowerSetBusClockFrequency(222);
-    kscePowerSetGpuClockFrequency(222);
+    kscePowerSetGpuClockFrequencyInternal(222, 222);
     kscePowerSetGpuXbarClockFrequency(166);
 }
 
@@ -1358,8 +1382,8 @@ static void clocks_restore(const struct clocks *c)
     if (c->arm  > 0) kscePowerSetArmClockFrequency(c->arm);
     if (c->bus  > 0) kscePowerSetBusClockFrequency(c->bus);
     if (c->xbar > 0) kscePowerSetGpuXbarClockFrequency(c->xbar);
-    /* The GPU getter is an internal one; only trust a value it could be. */
-    if (gpu_clock_valid(c->gpu)) kscePowerSetGpuClockFrequency(c->gpu);
+    if (gpu_clock_valid(c->gpu_a) && gpu_clock_valid(c->gpu_b))
+        kscePowerSetGpuClockFrequencyInternal(c->gpu_a, c->gpu_b);
 }
 
 static void run_bench_suite(int clocks_to_max)
@@ -1382,11 +1406,12 @@ static void run_bench_suite(int clocks_to_max)
     }
 
     struct clocks saved;
-    clocks_save(&saved);
+    clocks_read(&saved);
     log_clocks("before");
     if (clocks_to_max) {
         clocks_max();
         log_clocks("max");
+        g_bench_hold_clocks = 1;
     }
     flush_log_to_disk();
 
@@ -1420,12 +1445,14 @@ static void run_bench_suite(int clocks_to_max)
             if (ksceKernelStartThread(th, 0, NULL) >= 0)
                 ksceKernelWaitThreadEnd(th, NULL, NULL);
             ksceKernelDeleteThread(th);
+            log_clocks("after leg");
             log_line("bench leg end");
             flush_log_to_disk();
         }
     }
 
     /* Put back exactly what the firmware had. */
+    g_bench_hold_clocks = 0;
     log_line("bench: restoring firmware ACTLR, PL310 and clocks");
     apply_l1_actlr(orig_actlr & B_ACTLR_OWNED, ~orig_actlr & B_ACTLR_OWNED);
     pl310_prefetch_rmw(B_PCTL_OWNED, orig_pctl & B_PCTL_OWNED, NULL, NULL);

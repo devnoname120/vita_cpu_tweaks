@@ -21,7 +21,7 @@ stage=dist/for-testing
 rm -rf "$stage"
 mkdir -p "$stage"
 cp "$skprx" "$stage/prefetch_enabler.skprx"
-cp docs/for-testers.config.txt "$stage/prefetch_enabler.txt"
+cp docs/for-testers.config.ini "$stage/prefetch_enabler.ini"
 sed -e "s/^build:  .*/build:   $commit/" \
     -e "s/^sha256: .*/sha256:  $sum/" \
     docs/for-testers.md > "$stage/README-FOR-TESTERS.md"

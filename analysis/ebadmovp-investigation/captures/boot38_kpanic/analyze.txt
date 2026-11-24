@@ -1,0 +1,255 @@
+psp2-core-parse: warning [truncated-program-segment]: program segment 4 is missing 0x8c0 of 0x2020 bytes
+psp2-core-parse: warning [truncated-note-description]: KERNEL_INFO declares 0x200c description bytes but only 0x1744 are available
+*******************************************************************************
+*                                                                             *
+*                        Exception Analysis                                   *
+*                                                                             *
+*******************************************************************************
+
+KERNEL_DATA_ABORT
+
+Kernel data abort recorded by SceCrashDump on CPU 2 at 0x5eae6aec+0x3dfa. The MMU reported translation fault, page during a write at 0x000000de.
+
+PSP2CORE_ANALYSIS_SUMMARY:
+    Analyzer schema            : psp2_core_parse.analysis.v1
+    Classification             : KERNEL_DATA_ABORT
+    Failure bucket             : KERNEL_DATA_ABORT|fw=03600011|0x5eae6aec+0x3dfa|fs:07
+    Failure hash               : 96138579c4d5efe4ea69d83684274bef9cd777f2e59e86278e074238ecb51b1c
+    Dump completeness          : SALVAGED PREFIX
+    Notes / PT_LOAD            : 5 / 0
+    Captured memory            : 0x0 (0 B)
+    Process                    : unavailable (unavailable)
+    Application                : unavailable
+    Threads / modules          : 0 / 0
+    Kernel objects / active    : 0 / 0
+    Wait edges / cycles        : 0 / 0
+    Decoded / partial notes    : 5 / 1
+
+DUMP_FILE:
+    psp2core-SceKernelProcess.spsp2dmp
+
+DUMP_FILE_ATTRIBUTES:
+    Encryption                 : AES-128-CBC (retail key ID 2)
+    HMAC verification          : verified (retail keys)
+    Access parameters          : stop=0x00000000 pc=0x00000000 lr=0x00000000 system=0x03600011
+    Compression                : gzip
+    Compression complete       : true
+    ELF class / machine        : ELF32 / 40
+    ELF type / flags           : 4 / 0x05000000
+    Input size                 : 0xc50 (3.1 KiB)
+    ELF image size             : 0x1bb0 (6.9 KiB)
+    Program headers            : 5 / 5
+    File SHA-256               : d869b2a4c1bcac6f0516b2a20ada5f553db098ff42640f83d533a1f1891b666b
+    Image SHA-256              : 9a5c887537d6bb4501b02419f78d48f09178eb26e95c8c12256eb9cb0c1e78dc
+    Structural issues          : {'error': 2}
+        error truncated-program-segment: program segment 4 is missing 0x8c0 of 0x2020 bytes
+        error truncated-note-description: KERNEL_INFO declares 0x200c description bytes but only 0x1744 are available
+
+NOTE_DECODER_COVERAGE:
+    Recovered notes            : 5
+    Decoded                    : 5
+    Partial                    : 1
+    Inventory only             : 0
+    Decoder errors             : 0
+
+NOTE_INVENTORY:
+    [00] type=0x1000 v=1    size=0x28/0x28 decoded   COREFILE_INFO
+         sha256=35e6f47b377a25ad97cdb03a2f582828d4cd302a4a37a4306763ccef1423e924
+    [01] type=0x1001 v=4    size=0x60/0x60 decoded   SYSTEM_INFO
+         sha256=8a765579e5c8489d2a4a1015a533f5aea8669321d9ee1593c2141926965899c7
+    [02] type=0x101a v=4    size=0x80/0x80 decoded   HW_INFO
+         sha256=d31272bbe15cf40bc7ebbcc3cbb95432147e32e4df308d6edeae77f9763cfc11
+    [03] type=0x101d v=6    size=0x204/0x204 decoded   BUILD_VER_INFO
+         sha256=83c13aee7276dd21d5b463cb5b1bb573db8bccaad8d4e51c583f7c10e7f0dd40
+    [04] type=0x3000 v=8    size=0x1744/0x200c partial   KERNEL_INFO
+         sha256=2f003f63145b91037311a922db16462d2eb252424db41774aa5483d221dc6929
+
+SCECOREDUMP_COLLECTION_STAGES:
+    SUMMARY_INFO unavailable; planned-versus-written stages cannot be reconciled.
+
+CAPTURE_ENVIRONMENT:
+    APP_INFO unavailable
+    System producer words      : 0x03600011 0x03600011
+    Hardware revision word     : 0x00000105
+    Hardware flags word        : 0x00000010
+    Build branch               : release_branches/release_03.600
+    Corefile kind / subtype    : 0x00000013 / 0x00000002
+
+PROCESS_CONTEXT:
+    PROCESS_INFO unavailable
+
+APPLICATION_AND_PROCESS_SET:
+    APP_LIST_INFO unavailable
+    EXTNL_PROC_INFO unavailable
+
+FAULT_EVIDENCE:
+    No applicable architectural FAR/FSR pair was recovered for this stop reason.
+
+KERNEL_CRASH_DUMP:
+    Classification             : KERNEL_DATA_ABORT
+    Integrity                  : SALVAGED
+    Kind                       : kernel exception (0)
+    CPU                        : 2
+    SceCrashDump firmware      : 3.60 (0x03600011)
+    TTBR0 / VBAR / sysroot     : 0x4020804a / 0x00008180 / 0x00030000
+    Session ID                 : d31302738c7e55ed79500d41b69955f1
+        error kernel-info-wrapper-size: KERNEL_INFO wrapper declares 0x2000 ELF bytes but 0x1738 are captured; using the available note bytes
+
+KERNEL_EXCEPTION_DUMP:
+    Process / thread           : 0x00010005 / 0x00031dcf
+    CPU / system time          : 2 / 35043675 us
+    Source hashes              : file=0xd098ac7d line=0x95ea3a47 function=0xbe5eefbe
+    Exception reason           : 1
+    PC module                  : 0x5eae6aec+0x3dfa
+    r0 =000000de  r1 =00000000  r2 =298666ed  r3 =0000006f
+    r4 =00000000  r5 =deadbeef  r6 =deadbeef  r7 =deadbeef
+    r8 =deadbeef  r9 =deadbeef  r10=00000149  r11=deadbeef
+    r12=01ea3ded  r13=01c6cf60  r14=01bf929b  r15=01ea3dfa
+    CPSR (SPSR)                : 0x6000003f (Thumb)
+    DFSR / DFAR                : 0x000008c7 / 0x000000de
+    IFSR / IFAR                : 0x00000000 / 0x00000000
+    TTBR1 / DACR / CONTEXTIDR  : 0x4020c04a / 0x15450000 / 0x031dcff0
+    FPSCR / FPEXC              : 0x03000000 / 0x40000000
+    Waypoints                  : 28
+        (20) 0x00aa2614 -> 0x00a9a178 Thumb-16 0x3380b323+0x1a178
+        (21) 0x00a9a188 -> 0x00a99fa8 Thumb-32 0x3380b323+0x19fa8
+        (22) 0x00a99fb4 -> 0x00a99fb6 Thumb-16 0x3380b323+0x19fb6
+        (23) 0x00a99fb8 -> 0x01bf807c Thumb-16 0x5b498cc4+0x7c
+        (24) 0x01bf807e -> 0x00a99fba Thumb-16 0x3380b323+0x19fba
+        (25) 0x00a99fba -> 0x00a9a18c Thumb-16 0x3380b323+0x1a18c
+        (26) 0x00a9a198 -> 0x00aa2654 Thumb-32 0x3380b323+0x22654
+        (27) 0x00aa2662 -> 0x00aa2664 Thumb-16 0x3380b323+0x22664
+        (28) 0x00aa2666 -> 0x00a9a19c Thumb-16 0x3380b323+0x1a19c
+        (29) 0x00a9a1a4 -> 0x00a9a1aa Thumb-16 0x3380b323+0x1a1aa
+        (30) 0x00a9a1b2 -> 0x01bf850a Thumb-16 0x5b498cc4+0x50a
+        (31) 0x01bf850c -> 0x01bf8786 Thumb-16 0x5b498cc4+0x786
+        ( 0) 0x01bf8786 -> 0x01bf8788 Thumb-16 0x5b498cc4+0x788
+        ( 1) 0x01bf878c -> 0x01bf8792 Thumb-16 0x5b498cc4+0x792
+        ( 2) 0x01bf8794 -> 0x01bf8796 Thumb-16 0x5b498cc4+0x796
+        ( 3) 0x01bf879e -> 0x01bf87a0 Thumb-16 0x5b498cc4+0x7a0
+        ( 4) 0x01bf87a2 -> 0x01bf9284 Thumb-32 0x5b498cc4+0x1284
+        ( 5) 0x01bf9286 -> 0x01bf928a Thumb-32 0x5b498cc4+0x128a
+        ( 6) 0x01bf928a -> 0x01bfd460 ARM 0x5b498cc4+0x5460
+        ( 7) 0x01bfd468 -> 0x01ea3178 Thumb-32 0x5eae6aec+0x3178
+        ( 8) 0x01ea3184 -> 0x01bf928e Thumb-16 0x5b498cc4+0x128e
+        ( 9) 0x01bf9290 -> 0x01bfd470 ARM 0x5b498cc4+0x5470
+        (10) 0x01bfd478 -> 0x01ea2bf4 Thumb-32 0x5eae6aec+0x2bf4
+        (11) 0x01ea2c00 -> 0x01bf9294 Thumb-16 0x5b498cc4+0x1294
+        (12) 0x01bf9296 -> 0x01bfd480 ARM 0x5b498cc4+0x5480
+        (13) 0x01bfd488 -> 0x01ea3dec Thumb-32 0x5eae6aec+0x3dec
+        (14) 0x01ea3dec -> 0x01ea3dee Thumb-16 0x5eae6aec+0x3dee
+        (15) 0x01ea3df8 -> 0x00008190 precise data abort
+    Fault                      : translation fault, page (write) at 0x000000de
+    Kernel backtrace           : 2 producer-saved frame(s)
+        #0  PC=0x01ea3dfa SP=0x01c6cf60 0x5eae6aec+0x3dfa
+        #1  PC=0x01bf929b SP=0x01c6cf60 0x5b498cc4+0x129b
+    User backtrace             : 0 producer-saved frame(s)
+
+KERNEL_PHYSICAL_MEMORY:
+    No memory segments: SceCrashDump records memory only on development and QA units.
+
+KERNEL_TTY (last 40 of 72 lines):
+    [SceMarlinHci               ]:Starting...  OK        206usec
+    [SceKrm                     ]:Starting...  OK      53021usec
+    [SceTty2uart                ]:Starting...  OK(NO_RESIDENT)          1usec
+    SceProcessmgrKernelBudget::ScePhyMemPartKD : total=0x02400000, free=0x005d8000
+    [0syscall6                  ]:Starting...  OK      14449usec
+    [vitacompanion_kernel       ]:Starting...  OK       2272usec
+    [ttbr_remap                 ]:Starting...  OK          1usec
+    [vitastream                 ]:Starting...  OK       2049usec
+    [NoNpDrm                    ]:Starting...  OK       1522usec
+    [NoNpDrm                    ]:Starting...  OK       1356usec
+    [repatch                    ]:Starting...  OK       2381usec
+    yamt helper started 0, flags:
+     use_usb 1 | filog 0 | usb_leg 0 | nowake 0
+    mounting 0x800 = 0x80010011
+    [yamtHelper                 ]:Starting...  OK        715usec
+    [FdFix                      ]:Starting...  OK        272usec
+    [kubridge                   ]:Starting...  OK       1787usec
+    [CapUnlocker                ]:Starting...  OK        842usec
+    [PSVshell                   ]:Starting...  OK      16656usec
+    [vitabright                 ]:Starting...  OK     446562usec
+    [tls_fixer_kernel           ]:Starting...  OK    1224177usec
+    # Library function entry not found: [nid=0x717db06c, index=3, seg:offset=0:0x000054c0, fingerprint=0x5b498cc4] in [ScePowerForDriver, ver=1] (ignored)
+    [PFE] ==== vita_prefetch_enabler boot start ====
+    [PFE] config: bytes parsed 0x000011E8
+    [PFE] config: mode=bench self_disable=yes
+    [PFE] config: actlr.l1_dside_prefetch=on
+    [PFE] config: actlr.l2_prefetch_hint=on
+    [PFE] config: actlr.write_full_zeros=keep
+    [PFE] config: actlr.alloc_one_way=keep
+    [PFE] config: pl310.data_prefetch=on
+    [PFE] config: pl310.instr_prefetch=keep
+    [PFE] config: pl310.prefetch_drop=keep
+    [PFE] config: pl310.double_linefill=keep
+    [PFE] config: pl310.incr_double_linefill=keep
+    [PFE] config: pl310.prefetch_offset=15
+    [PFE] config: bench.clocks=max
+    [PFE] selfdisable: own config.txt line commented out for next boot
+    [Shell]: vsh/release_branches/release_03.600 r142469 (build#753885)
+    
+    *** network ready. myaddr: 192.168.1.146 ***
+
+CPU_THREADS:
+    Thread count               : 0
+    Crashed indices            : none
+
+PRIMARY_CRASH_REGISTER_CONTEXT:
+    Full primary-thread register context unavailable.
+
+DISASSEMBLY AROUND unavailable:
+    Status                     : unavailable
+    Reason                     : no primary crash-PC register context was recovered
+
+STACK_AND_INSTRUCTION_EVIDENCE:
+    Stack-scan return candidates:
+        none recovered
+    Stack-scan entries are candidates, not unwind-verified frames.
+
+LOADED_MODULES:
+    Module count               : 0
+
+CAPTURED_MEMORY:
+    PT_LOAD ranges             : 0
+
+CAPTURED_LIBRARY_SET:
+    LIBRARY_INFO unavailable
+
+FILE_RECORDS:
+    FILE_INFO unavailable
+
+SYSTEM_EVENT_RECORDS:
+    EVENT_LOG_INFO unavailable
+
+PROCESS_MEMORY_BUDGET_RECORDS:
+    BUDGET_INFO unavailable
+
+DEVICE_RECORDS:
+    DEVICE_INFO and SYS_DEVICE_INFO unavailable
+
+ASYNCHRONOUS_KERNEL_OBJECTS:
+    Callbacks                  : 0
+    Timers                     : 0
+
+KERNEL_OBJECTS_AND_WAIT_GRAPH:
+    Tables / objects           : 0 / 0
+    Kinds                      : 
+    Active objects             : 0
+    Wait edges / cycles        : 0 / 0
+
+TTY_LOG_EVIDENCE:
+    No TTY stream was recovered.
+    TTY timestamps and order are producer log evidence, not necessarily the exact exception time.
+
+FAILURE_IDENTITY:
+    Process name               : unavailable
+    Process ID                 : unavailable
+    Thread                     : unavailable (unavailable)
+    PC                         : unavailable
+    Fault address              : not applicable
+    Failure bucket             : KERNEL_DATA_ABORT|fw=03600011|0x5eae6aec+0x3dfa|fs:07
+    Failure hash               : 96138579c4d5efe4ea69d83684274bef9cd777f2e59e86278e074238ecb51b1c
+
+FOLLOWUP_COMMANDS:
+    psp2-core-parse libraries psp2core-SceKernelProcess.spsp2dmp --address ADDRESS
+    psp2-core-parse notes psp2core-SceKernelProcess.spsp2dmp NOTE_NAME --json
