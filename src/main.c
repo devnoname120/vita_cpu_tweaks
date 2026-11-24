@@ -84,68 +84,26 @@ static const unsigned int actlr_set[4] = {
     0xE12FFF1Eu,  /* BX lr */
 };
 
-static const unsigned int pl310_set[9] = {
-    0xE59F1018u,  /* LDR r1,[pc,#0x18]      ; r1 = PL310_BASE */
-    0xE5910F60u,  /* LDR r0,[r1,#0xF60]     ; PREFETCH_CTRL */
-    0xE3800201u,  /* ORR r0,r0,#0x10000000  ; set bit[28] */
-    0xF57FF040u,  /* DSB SY */
-    0xE5810F60u,  /* STR r0,[r1,#0xF60] */
-    0xF57FF040u,  /* DSB SY */
-    0xE5910F60u,  /* LDR r0,[r1,#0xF60]     ; read back */
-    0xE12FFF1Eu,  /* BX lr */
-    0x1A002000u,  /* literal: PL310_BASE */
-};
-
 extern int splCl_smc(unsigned int a0, unsigned int a1, unsigned int a2,
                      unsigned int a3, unsigned int idx);
 #define SPLTZ_SMC_EXEC_WITH_SP 0x401u
 
-/*
- * Maps a second, execute-only alias of the physical page already backing
- * code_va - our own module's own already-loaded, already-coherent code -
- * instead of injecting a stub into another module's memory. No write, no
- * cache flush: the bytes at that PA are already correct and were already
- * made I-fetchable by the ordinary module loader when we were loaded.
- *
- * Per SKGleba (2026-11-24): va2pa on your own code, map that PA as a
- * kernel RX memblock, feed the result straight to EXEC_WITH_SP - no
- * SPLx_TZS_GETMODSVA/module lookup needed for our own code at all, only
- * for the stack (still sourced from SYSMEM's data segment below).
- *
- * Caller must keep the returned block alive until done executing through
- * *out_exec_va, then free it.
- */
-static SceUID map_own_code_rx(const void *code_va, void **out_exec_va)
-{
-    uintptr_t pa = 0;
-    if (ksceKernelVAtoPA(code_va, &pa) < 0) return -1;
+/* Secure read/write primitives (libspl.h gates these behind an ifdef that may
+ * not be set in this build; unconditionally present in the vendored libspl.a,
+ * verified with nm). Both take a *secure* VA. */
+extern int SPLx_TZS_READ32(unsigned int sva, unsigned int *rval);
+extern int SPLx_TZS_WRITE32(unsigned int sva, unsigned int val);
 
-    unsigned int page_pa  = (unsigned int)pa & ~0xFFFu;
-    unsigned int page_off = (unsigned int)pa &  0xFFFu;
+/* PL310 L2C-310 PREFETCH_CTRL. Base 0x1A002000 is identity-mapped secure RW
+ * (boot 9 PRINTTBR: L1_SECTn 0x1A000000 1M, AP=001), so its secure VA equals
+ * its PA. Bit 28 = data prefetch enable - same bit the old pl310_set stub set,
+ * but reached by a secure write instead of secure code execution. */
+#define PL310_PREFETCH_CTRL_SVA 0x1A002F60u
+#define PL310_DATA_PREFETCH_EN  0x10000000u
 
-    static const unsigned int rx_types[2] = {
-        SCE_KERNEL_MEMBLOCK_TYPE_KERNEL_RX,
-        SCE_KERNEL_MEMBLOCK_TYPE_KERNEL_TOOL_RX,
-    };
-    SceUID blk = -1;
-    void  *base = NULL;
-    for (int i = 0; i < 2; i++) {
-        SceKernelAllocMemBlockKernelOpt opt;
-        memset(&opt, 0, sizeof(opt));
-        opt.size  = (unsigned int)sizeof(opt);
-        opt.attr  = SCE_KERNEL_ALLOC_MEMBLOCK_ATTR_HAS_PADDR;
-        opt.paddr = page_pa;
-        blk = ksceKernelAllocMemBlock("pfe_rx", rx_types[i], 0x1000, &opt);
-        if (blk >= 0) break;
-    }
-    if (blk < 0) return blk;
-
-    ksceKernelGetMemBlockBase(blk, &base);
-    *out_exec_va = (void *)((unsigned int)base + page_off);
-    return blk;
-}
-
-static char g_log[32768];
+/* Sized for a full SPLx_TZS_PRINTTBR(1) secure page-table dump (both TTBRs,
+ * L1 sections plus their L2 pages) on top of the ordinary boot log. */
+static char g_log[131072];
 static int  g_log_len;
 
 /* Pure buffer append, no ksceDebugPrintf call - safe to use from inside
@@ -164,6 +122,30 @@ static void log_line(const char *s)
 {
     append_log(s);
     LOG("%s\n", s);
+}
+
+/*
+ * Writes the current g_log out to disk right now, rather than only once at
+ * the end of module_start(). Called as a checkpoint immediately before and
+ * after each EXEC_WITH_SP call below - those are genuinely untested on real
+ * hardware (every previous boot failed earlier, during SPLx_CFK_INIT()
+ * itself), so if one of them wedges or kills the thread outright, the log
+ * up to the last checkpoint survives on disk instead of being lost with
+ * whatever never made it to a final write.
+ */
+static void flush_log_to_disk(void)
+{
+    SceUID fd = ksceIoOpen(LOG_PATH, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
+    if (fd >= 0) {
+        ksceIoWrite(fd, g_log, (SceSize)g_log_len);
+        ksceIoClose(fd);
+    }
+    ksceIoMkdir("host0:prefetch_enabler", 0777);
+    SceUID hfd = ksceIoOpen(HOST_LOG, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
+    if (hfd >= 0) {
+        ksceIoWrite(hfd, g_log, (SceSize)g_log_len);
+        ksceIoClose(hfd);
+    }
 }
 
 static int contains(const char *hay, const char *needle)
@@ -408,10 +390,11 @@ static int self_disable_in_config(const char **reason)
 /* Reads CONFIG_PATH and decides which sites to enable. Any failure to open
  * the file, or any line that isn't a recognized "key=value", leaves that
  * key's flag at its "off" default. */
-static void read_config(int *want_l1, int *want_l2)
+static void read_config(int *want_l1, int *want_l2, int *probe_only)
 {
     *want_l1 = 0;
     *want_l2 = 0;
+    *probe_only = 0;
 
     SceUID fd = ksceIoOpen(CONFIG_PATH, SCE_O_RDONLY, 0);
     if (fd < 0) {
@@ -458,32 +441,122 @@ static void read_config(int *want_l1, int *want_l2)
         } else if (streq_ci(key, keylen, "l2_prefetch")) {
             *want_l2 = on;
             log_line(on ? "config: l2_prefetch=on" : "config: l2_prefetch=off");
+        } else if (streq_ci(key, keylen, "probe_only")) {
+            *probe_only = on;
+            log_line(on ? "config: probe_only=on" : "config: probe_only=off");
         }
     }
 }
 
-static int run_actlr_core(SceSize args, void *argp)
-{
-    unsigned int exec_va = *(unsigned int *)argp;
-    unsigned int stack_sva = *((unsigned int *)argp + 1);
+/*
+ * libspl.h hides PRINTTBR behind SPLIB_NODEBUG, which this build may define;
+ * the symbol is unconditionally present in the vendored libspl.a (verified
+ * with nm), and psp2spl's own `typedef int bool` makes int the right type.
+ */
+extern int SPLx_TZS_PRINTTBR(int printl2);
 
-    unsigned int before = 0;
+/*
+ * Read-only reconnaissance of the secure world's address space, to find out
+ * where EXEC_WITH_SP's `func` can legally point.
+ *
+ * Boot 8 proved the SMC itself is reached and that SYSMEM's trampoline does
+ * `mov sp, r1` / `blx r2` with no translation of either value (disassembled
+ * at SYSMEM .text+0x60), so `func` has to be executable under the *secure*
+ * page tables. We had been handing it a non-secure kernel VA from
+ * ksceKernelGetMemBlockBase(), which secure world has no reason to have
+ * mapped - hence the unrecoverable hang.
+ *
+ * PRINTTBR walks both TTBRs straight through layout->mbase, the ordinary
+ * non-secure mapping of the TZ region, and issues no SMC at all, so this
+ * cannot wedge the machine the way an EXEC_WITH_SP guess can. It prints
+ * XN/PXN/AP per entry, which is what identifies a usable target. SVA2PA is
+ * likewise a pure table walk. Our own code page's PA is logged alongside so
+ * the dump can be searched offline for a secure mapping that covers it.
+ */
+static void probe_secure_layout(void)
+{
+    log_line("---- probe: secure layout (read-only, no SMC) ----");
+
+    uintptr_t own_pa = 0;
+    if (ksceKernelVAtoPA((void *)actlr_set, &own_pa) >= 0)
+        log_hex_line("probe own actlr_set pa ", (unsigned int)own_pa);
+    else
+        log_line("probe: VAtoPA(actlr_set) failed");
+
+    static const struct { int mod; const char *name; } mods[2] = {
+        { SPLTZ_MODINFO_SYSMEM,  "probe sysmem  " },
+        { SPLTZ_MODINFO_INTRMGR, "probe intrmgr " },
+    };
+    for (int i = 0; i < 2; i++) {
+        unsigned int sva = 0, pa = 0;
+        if (SPLx_TZS_GETMODSVA(mods[i].mod, 0, 0, &sva) < 0) continue;
+        log_hex_line(mods[i].name, sva);
+        if (SPLx_TZS_SVA2PA(sva, &pa) >= 0)
+            log_hex_line("  -> pa ", pa);
+        else
+            log_line("  -> SVA2PA failed");
+    }
+
+    log_line("---- probe: PRINTTBR(1) ----");
+    ksceKernelRegisterKprintfHandler(kprintf_capture_handler, NULL);
+    int pr = SPLx_TZS_PRINTTBR(1);
+    ksceKernelRegisterKprintfHandler(kprintf_noop_handler, NULL);
+    log_hex_line("probe printtbr ret ", (unsigned int)pr);
+    log_hex_line("probe log used ", (unsigned int)g_log_len);
+}
+
+/*
+ * Does ACTLR even need secure world? ACTLR is a cp15 register, and on the
+ * Cortex-A9 whether its prefetch bits are writable from non-secure PL1 is a
+ * firmware NSACR decision. If a plain MCR here sticks, the whole
+ * EXEC_WITH_SP path is unnecessary for L1 - we just do this per core.
+ *
+ * Hang-proof: pure cp15 ops in a normal kernel thread, no SMC. If the write
+ * is not permitted, the A9 ignores it (read-back simply unchanged); a true
+ * UNDEF would only kill this thread, not the machine, and the dead-man's
+ * switch has already disabled us for the next boot regardless.
+ */
+static int probe_actlr_core(SceSize args, void *argp)
+{
+    (void)args; (void)argp;
+    unsigned int mpidr = 0, before = 0, after = 0;
+    __asm__ __volatile__("mrc p15, 0, %0, c0, c0, 5" : "=r"(mpidr));
     __asm__ __volatile__("mrc p15, 0, %0, c1, c0, 1" : "=r"(before));
-    int r = splCl_smc(0, stack_sva, exec_va, 0, SPLTZ_SMC_EXEC_WITH_SP);
-    unsigned int after = 0;
+    unsigned int want = before | 0x6u;
+    __asm__ __volatile__("mcr p15, 0, %0, c1, c0, 1" :: "r"(want));
+    __asm__ __volatile__("isb");
     __asm__ __volatile__("mrc p15, 0, %0, c1, c0, 1" : "=r"(after));
 
-    unsigned int mpidr = 0;
-    __asm__ __volatile__("mrc p15, 0, %0, c0, c0, 5" : "=r"(mpidr));
-    LOG("actlr core%u: before=%08X after=%08X smc=%d\n", mpidr & 0xF, before, after, r);
-
-    log_hex_line("actlr core  ", mpidr & 0xFu);
-    log_hex_line("actlr before", before);
-    log_hex_line("actlr after ", after);
-    log_hex_line("actlr smc   ", (unsigned int)r);
-
-    (void)args;
+    char buf[80];
+    static const char hexd[] = "0123456789ABCDEF";
+    int n = 0;
+    const char *p = "probe actlr ns core ";
+    while (*p) buf[n++] = *p++;
+    buf[n++] = hexd[mpidr & 0xF];
+    p = " before=";
+    while (*p) buf[n++] = *p++;
+    for (int s = 28; s >= 0; s -= 4) buf[n++] = hexd[(before >> s) & 0xF];
+    p = " after=";
+    while (*p) buf[n++] = *p++;
+    for (int s = 28; s >= 0; s -= 4) buf[n++] = hexd[(after >> s) & 0xF];
+    buf[n] = '\0';
+    log_line(buf);
     return 0;
+}
+
+static void probe_nonsecure_actlr(void)
+{
+    log_line("---- probe: non-secure ACTLR write (no SMC) ----");
+    static const int masks[4] = { 0x10000, 0x20000, 0x40000, 0x80000 };
+    for (int i = 0; i < 4; i++) {
+        SceUID th = ksceKernelCreateThread("pfe_pactlr", probe_actlr_core,
+                                           0x10, 0x2000, 0, masks[i], NULL);
+        if (th < 0) { log_hex_line("probe actlr thread create failed ", (unsigned int)th); continue; }
+        if (ksceKernelStartThread(th, 0, NULL) >= 0)
+            ksceKernelWaitThreadEnd(th, NULL, NULL);
+        ksceKernelDeleteThread(th);
+        flush_log_to_disk();
+    }
 }
 
 int module_start(SceSize argc, const void *args)
@@ -503,10 +576,10 @@ int module_start(SceSize argc, const void *args)
         goto write_out;
     }
 
-    int want_l1 = 0, want_l2 = 0;
-    read_config(&want_l1, &want_l2);
+    int want_l1 = 0, want_l2 = 0, probe_only = 0;
+    read_config(&want_l1, &want_l2, &probe_only);
 
-    if (!want_l1 && !want_l2) {
+    if (!want_l1 && !want_l2 && !probe_only) {
         log_line("nothing to enable, exiting cleanly");
         goto write_out;
     }
@@ -519,66 +592,61 @@ int module_start(SceSize argc, const void *args)
         ksceKernelRegisterKprintfHandler(kprintf_noop_handler, NULL);
         log_hex_line("cfk_init_ret ", (unsigned int)ret);
         if (ret < 0) { log_line("CFK init failed, aborting"); goto write_out; }
+        flush_log_to_disk(); /* checkpoint: past the point every prior boot failed at */
     }
 
-    {
-        unsigned int data_sva = 0;
-        SPLx_TZS_GETMODSVA(SPLTZ_MODINFO_SYSMEM, 1, 0, &data_sva);
-        unsigned int stack_sva = data_sva + 0x200u;
-        log_hex_line("sysmem_data ", data_sva);
+    if (probe_only) {
+        probe_secure_layout();
+        probe_nonsecure_actlr();
+        log_line("probe_only: skipping all EXEC_WITH_SP calls");
+        goto write_out;
+    }
 
-        if (want_l1) {
-            void *exec_va = NULL;
-            SceUID blk = map_own_code_rx(actlr_set, &exec_va);
-            if (blk < 0) {
-                log_hex_line("actlr rx map failed ", (unsigned int)blk);
-            } else {
-                log_hex_line("actlr exec_va ", (unsigned int)exec_va);
-                static const int masks[4] = { 0x10000, 0x20000, 0x40000, 0x80000 };
-                unsigned int argp[2] = { (unsigned int)exec_va, stack_sva };
-                for (int i = 0; i < 4; i++) {
-                    SceUID th = ksceKernelCreateThread("pfe_actlr", run_actlr_core,
-                                                       0x10, 0x2000, 0, masks[i], NULL);
-                    if (th < 0) continue;
-                    if (ksceKernelStartThread(th, sizeof(argp), argp) >= 0)
-                        ksceKernelWaitThreadEnd(th, NULL, NULL);
-                    ksceKernelDeleteThread(th);
-                }
-                ksceKernelFreeMemBlock(blk);
-                log_line("actlr: set on all cores");
-            }
-        }
+    if (want_l1) {
+        /*
+         * ACTLR is a cp15 register, settable only by an MCR run in secure
+         * PL1, per core. Boot 10 showed a non-secure PL1 MCR faults here, and
+         * EXEC_WITH_SP needs `func` mapped executable in secure world - which
+         * our own code page is not (boot 9 PRINTTBR: PA 0x4128F000 absent from
+         * the secure tables, and no secure page is both writable and
+         * executable). Until there is a mechanism to run our stub in secure
+         * world, do NOT take the old EXEC_WITH_SP path: it jumps into unmapped
+         * secure memory and hangs the machine (boot 8). Skip loudly instead.
+         */
+        log_line("l1_prefetch: ACTLR needs secure-PL1 execution, no mechanism yet - SKIPPED (see ebadmovp README)");
+    }
 
-        if (want_l2) {
-            void *exec_va = NULL;
-            SceUID blk = map_own_code_rx(pl310_set, &exec_va);
-            if (blk < 0) {
-                log_hex_line("pl310 rx map failed ", (unsigned int)blk);
-            } else {
-                log_hex_line("pl310 exec_va ", (unsigned int)exec_va);
-                int r = splCl_smc(0, stack_sva, (unsigned int)exec_va, 0, SPLTZ_SMC_EXEC_WITH_SP);
-                log_hex_line("pl310 smc_ret ", (unsigned int)r);
-                ksceKernelFreeMemBlock(blk);
-            }
+    if (want_l2) {
+        /*
+         * PL310 is MMIO, not a cp15 register, so no code execution is needed:
+         * flip PREFETCH_CTRL bit 28 with a secure read-modify-write. tzs_*32
+         * are already exercised successfully during SPLx_TZS_INIT above.
+         */
+        unsigned int before = 0;
+        int rr = SPLx_TZS_READ32(PL310_PREFETCH_CTRL_SVA, &before);
+        log_hex_line("l2 read32 ret ", (unsigned int)rr);
+        if (rr < 0) {
+            log_line("l2_prefetch: secure read of PREFETCH_CTRL failed - aborting L2");
+        } else {
+            log_hex_line("l2 prefetch_ctrl before ", before);
+            int rw = SPLx_TZS_WRITE32(PL310_PREFETCH_CTRL_SVA,
+                                      before | PL310_DATA_PREFETCH_EN);
+            log_hex_line("l2 write32 ret ", (unsigned int)rw);
+            unsigned int after = before;
+            SPLx_TZS_READ32(PL310_PREFETCH_CTRL_SVA, &after);
+            log_hex_line("l2 prefetch_ctrl after ", after);
+            if (after & PL310_DATA_PREFETCH_EN)
+                log_line("l2_prefetch: PL310 data prefetch ENABLED");
+            else
+                log_line("l2_prefetch: bit did not stick (write ignored?)");
         }
+        flush_log_to_disk();
     }
 
     log_line("==== vita_prefetch_enabler boot done ====");
 
 write_out:
-    {
-        SceUID fd = ksceIoOpen(LOG_PATH, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
-        if (fd >= 0) {
-            ksceIoWrite(fd, g_log, (SceSize)g_log_len);
-            ksceIoClose(fd);
-        }
-        ksceIoMkdir("host0:prefetch_enabler", 0777);
-        SceUID hfd = ksceIoOpen(HOST_LOG, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
-        if (hfd >= 0) {
-            ksceIoWrite(hfd, g_log, (SceSize)g_log_len);
-            ksceIoClose(hfd);
-        }
-    }
+    flush_log_to_disk();
     return SCE_KERNEL_START_SUCCESS;
 }
 

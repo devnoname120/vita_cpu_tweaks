@@ -18,7 +18,7 @@ import os
 HOST = "192.168.1.146"
 FTP_PORT = 1337
 CMD_PORT = 1338
-NEEDLE = b"prefetch_enabler.skprx"
+NEEDLE = b"ur0:tai/prefetch_enabler.skprx"
 SKPRX_LOCAL = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
     os.path.dirname(__file__), "..", "..", "..", "build", "prefetch_enabler.skprx")
 

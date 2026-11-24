@@ -4,6 +4,65 @@ Investigation into why `SPLx_CFK_INIT()` fails with `SPL_TZSGMSV_EBADMOVP`
 (-36) during `SPLx_TZS_INIT`'s own eager resolution of SYSMEM (module 1),
 on the retail PCH-1000 test unit, firmware 3.60 via enso.
 
+---
+
+## RESOLVED (2026-11-24)
+
+EBADMOVP is **fixed**. The cause was exactly the mandatory-`.data`-resolution
+side effect described below: `SPLx_TZS_INIT`'s own `.text`-only SYSMEM lookup
+still forces a `.data` resolution because SYSMEM's `tzs_offsets.c` table entry
+has a nonzero `DATAMP`, and that offset is not a real `MOVW`/`MOVT` pair on
+retail 3.60. Nothing in psp2spl ever actually needs SYSMEM's `.data`, so the
+fix is to set SYSMEM's `DATAMP` to `0` (same sentinel `BUSERR` already uses) -
+see `patches/0001-sysmem-datamp-zero.patch` and `../../third_party/psp2spl/`.
+Boots 8-11 confirm it on hardware: `TZSGMS: m1 .text: 0x00200000 | .data:
+0x00000000` (no `.data` resolution attempted) and `cfk_init_ret 0x5` (success).
+
+So the sections below titled "the previously-tested patch used the wrong
+adjustment" and "Nothing we can fix from the plugin side" are **superseded** -
+they were written before the DATAMP=0 approach. Keep them only for the check
+mechanics they explain.
+
+### Post-fix: the EXEC_WITH_SP hang, and the L1/L2 split
+
+With CFK_INIT working, the plugin reached its real job - running the ACTLR and
+PL310 setters in secure world via `EXEC_WITH_SP` (SMC 0x401) - and **hung the
+machine** (boot 8, unrecoverable except by power-cycle; the dead-man's switch
+made the next boot clean). Root cause, nailed down read-only:
+
+* SYSMEM's `exec_with_sp(arg, sp, func)` trampoline (disassembled at SYSMEM
+  `.text+0x60`) is literally `mov sp, r1` / `blx r2` - **no address
+  translation**, run under the *secure* page tables. So `func` must be
+  executable *in secure world*.
+* We were handing it `ksceKernelGetMemBlockBase()`'s **non-secure** kernel VA.
+  `blx` into unmapped secure memory -> abort in the monitor -> hang.
+* `SPLx_TZS_PRINTTBR(1)` (boot 9, `boot_log_9_printtbr.log`, parsed by
+  `scripts/analyze_tbr.py`) proves it: our code page's PA (`0x4128F000`) has
+  **no secure mapping at all**, and there is **no secure page that is both
+  writable and executable**. So neither "alias our own code" nor "allocate a
+  page, write a stub, execute it" can work through the page tables.
+
+That splits the two knobs:
+
+* **L2 / PL310 - SOLVED.** PL310 is MMIO, identity-mapped secure-RW at
+  `sva 0x1A000000` (1 MiB L1 section, AP=001). No code execution needed: set
+  `PREFETCH_CTRL` (`0x1A002F60`) bit 28 with `SPLx_TZS_WRITE32`. Boot 11:
+  `0x21000000 -> 0x31000000`, read-back confirms, "data prefetch ENABLED",
+  clean boot. This is what the plugin now does.
+* **L1 / ACTLR - BLOCKED.** ACTLR is a cp15 register, settable only by an
+  `MCR` in secure PL1, per core. A non-secure PL1 `MCR` does not work (boot 10
+  wedged the probe thread), and `EXEC_WITH_SP` needs a secure-executable
+  `func` we have no way to supply yet. The plugin now **skips L1 loudly**
+  rather than taking the hanging path. Open options: SYSMEM's `MBALLOC`
+  secure allocator (SMC 0x402, registered but unused by the library - does it
+  return executable memory?), or a kernel_boot_loader byte-patch approach
+  entirely outside this plugin.
+
+`probe_only=on` in `ur0:data/prefetch_enabler.txt` re-runs the read-only
+PRINTTBR + non-secure-ACTLR reconnaissance without touching `EXEC_WITH_SP`.
+
+---
+
 ## The check
 
 `SPLx_TZS_GETMODSVA` reads two 32-bit words at a hardcoded `.text`-relative

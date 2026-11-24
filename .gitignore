@@ -7,3 +7,6 @@ analysis/**/*.bin
 analysis/**/*.a
 analysis/**/*.o
 analysis/**/*.i64
+
+# verification scratch: extracted objects/tables from psp2spl build output
+analysis/**/psp2spl_objs/
