@@ -2,10 +2,7 @@
 
 Investigation into why `SPLx_CFK_INIT()` fails with `SPL_TZSGMSV_EBADMOVP`
 (-36) during `SPLx_TZS_INIT`'s own eager resolution of SYSMEM (module 1),
-on the retail PCH-1000 test unit, firmware 3.60 via enso. See
-[[psp2spl-actlr-audit]] and [[feedback-security-check-bypass-risk]] in the
-assistant's memory for the earlier, higher-level narrative; this directory
-holds the actual data and scripts.
+on the retail PCH-1000 test unit, firmware 3.60 via enso.
 
 ## The check
 
@@ -94,9 +91,11 @@ table, not a `.data` base) or to small values like `0x000DC080`/`0x000DC08C`
 **Revised understanding of the 2026-11-24 hang incident:** we previously
 patched the table to point at `text+0x1488` and tested live; the device
 hung on the enso boot logo and needed the user to pull the SD2VITA to
-disable the plugin and recover (see [[feedback-security-check-bypass-risk]]
-for the fuller incident writeup and the general lesson about not
-bypassing a safety check to test a guess).
+disable the plugin and recover. General lesson from that incident: don't
+bypass a safety check to test a guess about the value it's gating, when
+the check's whole job is to turn "this looks wrong" into a clean abort -
+making the check *pass* isn't the same as making the value *correct*,
+and that's exactly what happened here (see below).
 
 At the time, the working theory was "the decoded address might just be
 wrong - it matched the bit pattern, but that doesn't mean it's really
@@ -144,4 +143,5 @@ a scratch-stack source is safe.
 - `tested-patches/` - the `0x1C44`→`0x1488` patched library variant that
   was flashed and live-tested (and caused the hang), kept for the
   record. **Do not reflash this without re-reading the Findings section
-  above and [[feedback-security-check-bypass-risk]] first.**
+  above first - the hang is not well explained by "wrong offset," and
+  nothing here has addressed the actual suspected cause.**
