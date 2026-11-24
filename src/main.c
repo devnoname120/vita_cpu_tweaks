@@ -38,6 +38,7 @@
 #include <psp2kern/kernel/modulemgr.h>
 #include <psp2kern/kernel/threadmgr.h>
 #include <psp2kern/power.h>
+#include <psp2kern/kernel/suspend.h>
 #include <psp2kern/kernel/sysmem.h>
 #include <psp2kern/kernel/debug.h>
 #include <psp2kern/kernel/sysclib.h>
@@ -1541,6 +1542,121 @@ static int bench_main_thread(SceSize args, void *argp)
     return 0;
 }
 
+/*
+ * ---- Surviving sleep ----
+ *
+ * A sleep powers the CPU cores down, and on wake the secure world resets
+ * them and the PL310 - psp2spl's own module notes that "at sleep-resume cmep
+ * & tzsmods are reset" and reinstalls itself. So the plugin follows the same
+ * protocol as psp2spl's module (module/main.c, spl_sysevent_handler):
+ *
+ *   - before sleep (event 0x20F, resume = 0): SPLx_CFK_DEINIT, then
+ *     SPLx_CFK_USSMALLOC to pre-allocate what the re-init will need;
+ *   - on wake (event 0x100000, resume = 1): re-init with SPL_IFL(_RESET).
+ *
+ * Unlike psp2spl's module, the re-init and the re-apply happen in a worker
+ * thread rather than in the handler itself, so they run in the same kind of
+ * context as at boot (normal thread, other cores up for the per-core ACTLR
+ * stub). Everything the ACTLR path caches is resolved again: secure modules
+ * are reloaded on wake and need not land where they were.
+ */
+#define SYSEVENT_SLEEP_PHASE2   0x20F
+#define SYSEVENT_RESUME_PHASE1  0x100000
+
+static struct pfe_masks g_resume_masks;
+static SceUID g_resume_evf = -1;
+static int g_resume_count;
+static int g_spl_down;
+
+static int pfe_sysevent_handler(int resume, int eventid, void *args, void *opt)
+{
+    (void)args; (void)opt;
+    if (eventid == SYSEVENT_SLEEP_PHASE2 && !resume && !g_spl_down) {
+        SPLx_CFK_DEINIT(SPL_IFL(_LV0) | SPL_IFL(_TZS));
+        SPLx_CFK_USSMALLOC();
+        g_spl_down = 1;
+    } else if (eventid == SYSEVENT_RESUME_PHASE1 && resume && g_resume_evf >= 0) {
+        ksceKernelSetEventFlag(g_resume_evf, 1);
+    }
+    return 0;
+}
+
+static void reapply_after_resume(void)
+{
+    g_resume_count++;
+    /* Keep the boot log, but don't let a long run of sleeps fill the buffer. */
+    if (g_log_len > (int)sizeof(g_log) / 2) {
+        g_log_len = 0;
+        log_line("(log restarted: buffer half full)");
+    }
+    log_hex_line("==== resume ", (unsigned int)g_resume_count);
+    log_line("resume: ACTLR as found after wake:");
+    probe_cpu_regs();
+
+    ksceKernelRegisterKprintfHandler(kprintf_capture_handler, NULL);
+    int r = SPLx_CFK_INIT(SPL_IFL(_LV0) | SPL_IFL(_TZS) | SPL_IFL(_RESET), 0, 1, 0,
+                          SPLV0_COMMBACKUP_CRITICAL);
+    ksceKernelRegisterKprintfHandler(kprintf_noop_handler, NULL);
+    log_hex_line("resume: cfk re-init ret ", (unsigned int)r);
+    if (r < 0) {
+        log_line("resume: psp2spl re-init FAILED - settings NOT re-applied after wake");
+        final_log_write();
+        return;
+    }
+    g_spl_down = 0;
+    flush_log_to_disk();
+
+    g_l1.resolved = 0;          /* secure layout may have moved: find it again */
+    if (g_resume_masks.actlr_set | g_resume_masks.actlr_clear)
+        apply_l1_actlr(g_resume_masks.actlr_set, g_resume_masks.actlr_clear);
+    if (g_resume_masks.pl310_set | g_resume_masks.pl310_clear) {
+        if (pl310_prefetch_rmw(g_resume_masks.pl310_clear, g_resume_masks.pl310_set,
+                               NULL, NULL) == 0)
+            log_line("pl310: requested fields APPLIED");
+        else
+            log_line("pl310: NOT applied - see the lines above");
+    }
+    probe_cpu_regs();
+    log_line("==== resume done ====");
+    final_log_write();
+}
+
+static int resume_thread(SceSize args, void *argp)
+{
+    (void)args; (void)argp;
+    for (;;) {
+        unsigned int bits = 0;
+        if (ksceKernelWaitEventFlag(g_resume_evf, 1, SCE_EVENT_WAITOR | SCE_EVENT_WAITCLEAR,
+                                    &bits, NULL) < 0)
+            return 0;
+        ksceKernelDelayThread(500 * 1000);      /* let the rest of resume finish */
+        reapply_after_resume();
+    }
+}
+
+static void enable_resume_support(const struct pfe_masks *mk)
+{
+    g_resume_masks = *mk;
+    g_resume_evf = ksceKernelCreateEventFlag("cput_resume", 0, 0, NULL);
+    if (g_resume_evf < 0) {
+        log_hex_line("resume: event flag FAILED, settings will not survive sleep ",
+                     (unsigned int)g_resume_evf);
+        return;
+    }
+    SceUID th = ksceKernelCreateThread("cput_resume", resume_thread, 0x40, 0x4000, 0, 0, NULL);
+    if (th < 0 || ksceKernelStartThread(th, 0, NULL) < 0) {
+        log_hex_line("resume: thread FAILED, settings will not survive sleep ", (unsigned int)th);
+        return;
+    }
+    int r = ksceKernelRegisterSysEventHandler("cput_sysevent", pfe_sysevent_handler, NULL);
+    if (r < 0) {
+        log_hex_line("resume: sysevent handler FAILED, settings will not survive sleep ",
+                     (unsigned int)r);
+        return;
+    }
+    log_line("resume: settings will be re-applied after every wake from sleep");
+}
+
 int module_start(SceSize argc, const void *args)
 {
     (void)argc; (void)args;
@@ -1647,6 +1763,9 @@ int module_start(SceSize argc, const void *args)
             log_line("pl310: NOT applied - see the lines above");
         flush_log_to_disk();
     }
+
+    if (want_actlr || want_pl310)
+        enable_resume_support(&mk);
 
     /*
      * Final per-core read-back, after all the work is done. The per-core

@@ -53,11 +53,10 @@ and only switch to `enable = on` once a `once` boot has worked. `on` has no
 safety net: if it ever hung, it would hang on every boot until the plugin's
 line is removed from `config.txt`.
 
-This also only re-applies on a **cold boot** — not on resume-from-sleep.
-Whether sleep/resume clears these bits on this hardware was never safely
-testable (attempting it with no other recovery path risks wedging the
-unit), so that's an open question, not a confirmed "it persists through
-sleep."
+Waking from sleep: the secure world resets the cores and the L2 controller
+on wake, so the plugin re-applies the settings after every wake, following
+psp2spl's own sleep/resume protocol (tear down before sleep, re-initialise
+with `RESET` on wake). **This wake path is not yet verified on hardware.**
 
 ## Why bother
 
