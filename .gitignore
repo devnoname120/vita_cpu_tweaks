@@ -1,1 +1,9 @@
 build/
+
+# analysis/: keep research text (scripts, README, captured logs/configs)
+# tracked; derived/extracted binaries stay in-project but untracked, same
+# convention as mach-o-vita's analysis/ dir.
+analysis/**/*.bin
+analysis/**/*.a
+analysis/**/*.o
+analysis/**/*.i64
