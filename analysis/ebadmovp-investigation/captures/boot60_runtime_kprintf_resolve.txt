@@ -1,0 +1,145 @@
+==== vita_cpu_tweaks boot start ====
+config: bytes parsed 0x00000ACF
+config: enable=once probe=off benchmark=off log=on
+config: actlr.l1_dside_prefetch=keep
+config: actlr.l2_prefetch_hint=on
+config: actlr.write_full_zeros=keep
+config: actlr.alloc_one_way=keep
+config: pl310.data_prefetch=on
+config: pl310.instr_prefetch=keep
+config: pl310.prefetch_drop=keep
+config: pl310.double_linefill=keep
+config: pl310.incr_double_linefill=keep
+config: pl310.prefetch_offset=15
+config: benchmark.clocks=max
+config: benchmark.timing=boot
+once: lines switched to off 0x00000001
+once: config now says off for the next boot
+[CPUT] I: Using KBLP for bufC0 & USSM params
+[CPUT] I: Creating global SPL root at 0x10720
+[CPUT] I: Allocating USSM from path: os0:sm/update_service_sm.self
+[CPUT] I: BA: 00000000[0000C000] <=> 305B0000(00031DA5)
+[CPUT] I: Allocated USSM cache: akidx=1, cache=0x305B0000, ussm_fw=0x03600000
+[CPUT] I: Inherited global SPL root at 0x10720
+[CPUT] I: BA: 1F850000[00001000] <=> 3000B000(00031DB3)
+[CPUT] I: BA: 00000000[00001000] <=> 30067000(00031DB5)
+[CPUT] I: SPLx_LV0P creating job 0(2) at 0x1F850320 (src=0x006EAF40)
+[CPUT] I: SPLx_LV0P creating job 1(2) at 0x1F850380 (src=0x006EAF80)
+[CPUT] I: SPLx_LV0P creating job 2(2) at 0x1F8503E0 (src=0x006EAFC0)
+[CPUT] I: SPLx_LV0P creating job 3(2) at 0x1F850440 (src=0x006EB000)
+[CPUT] I: SPLx_LV0P creating job 4(2) at 0x1F8504A0 (src=0x006EB040)
+[CPUT] I: SPLx_LV0P creating job 5(2) at 0x1F850500 (src=0x006EB080)
+[CPUT] I: SPLx_LV0_EXEC(xarg=0x006EAEA8, backup_mode=1, wait=0)
+ payload=0x00000000, size=0x00000000, pa_pa=0x1F850101, stack=0x00000000
+ args={0x1F850100, 0x1F850320, 0x00000000, 0x00000000}
+[CPUT] I: USSMXS2: s2pa=0x1F850004, s2jmpbap=0x3000B028(0x0080BE96)
+[CPUT] I: BA: 00000000[00001000] <=> 30068000(00031DB7)
+[CPUT] I: lv0_call_ussm(svc=0x50002, argv=30068000, size=0x90)
+[CPUT] I: lv0_call_ussm(svc=0x50002, argv=30068000, size=0x90)
+[CPUT] I: lv0_call_ussm(svc=0x50002, argv=30068000, size=0x90)
+[CPUT] I: lv0_call_ussm(svc=0x50002, argv=30068000, size=0x90)
+[CPUT] I: lv0_call_ussm(svc=0x50002, argv=30068000, size=0x90)
+[CPUT] I: lv0_call_ussm(svc=0xD0002, argv=30068000, size=0x60)
+[CPUT] I: Freeing USSM cache
+[CPUT] I: BF: 00031da5
+[CPUT] I: BF: 00031db7
+[CPUT] I: SPLx_LV0_EXEC s2r= 0x006EAEA8
+[CPUT] I: BF: 00031db5
+[CPUT] I: SPLx_LV0_EXEC(xarg=0x006EAEB8, backup_mode=1, wait=0)
+ payload=0x00000000, size=0x00000000, pa_pa=0x00000003, stack=0x00000000
+ args={0xE0010004, 0x00000000, 0x00000000, 0x00000000}
+[CPUT] I: BA: 00000000[00001000] <=> 30067000(00031DC3)
+[CPUT] I: SPLx_LV0_EXEC s2r= 0x006EAEB8
+[CPUT] I: BF: 00031dc3
+[CPUT] I: BA: 40000000[00200000] <=> 30600000(00031DC5)
+[CPUT] I: TZSI: tzsb[0]: 0xE59FF018
+[CPUT] I: SMC_SET(0x81): funcsva=0xFFFFFFFF
+[CPUT] I: TZSGMS: m0 .text: 0x0054A000 | .data: 0x00580000
+[CPUT] I: TZS3: xsmct: 0x00588280, 0x003EF000
+[CPUT] I: SMC_SET(0x82): funcsva=0x0054A30B
+[CPUT] I: SMC_SET(0x83): funcsva=0x0054A6BB
+[CPUT] I: tzs_write32: sva=0x0058848C, val=0x0054A6BB, arg={0x00000000, 0x0054A6BB, 0x00000000, 0x0058848C}
+[CPUT] I: SMC_SET(0x81): funcsva=0x0054A6A3
+[CPUT] I: tzs_write32: sva=0x00588484, val=0x0054A6A3, arg={0x00000000, 0x0054A6A3, 0x00000000, 0x00588484}
+[CPUT] I: TZSGMS: m1 .text: 0x00200000 | .data: 0x00000000
+[CPUT] I: SMC_SET(0x401): funcsva=0x00200061
+[CPUT] I: tzs_write32: sva=0x003EFC04, val=0x00200061, arg={0x00000000, 0x00200061, 0x00000000, 0x003EFC04}
+[CPUT] I: TZSGMS: m1 .text: 0x00200000 | .data: 0x00000000
+[CPUT] I: SMC_SET(0x402): funcsva=0x00204909
+[CPUT] I: tzs_write32: sva=0x003EFC08, val=0x00204909, arg={0x00000000, 0x00204909, 0x00000000, 0x003EFC08}
+[CPUT] I: TZSGMS: m1 .text: 0x00200000 | .data: 0x00000000
+[CPUT] I: SMC_SET(0x403): funcsva=0x00204AE9
+[CPUT] I: tzs_write32: sva=0x003EFC0C, val=0x00204AE9, arg={0x00000000, 0x00204AE9, 0x00000000, 0x003EFC0C}
+[CPUT] I: TZSI: Testing primitives..
+[CPUT] I: tzs_read32: sva=0x0054A04C, arg={0x00000000, 0x00000000, 0x00000000, 0x0054A04C}
+[CPUT] I: TZSI: success
+cfk_init_ret 0x00000005
+actlr set mask   0x00000002
+actlr clear mask 0x00000000
+l1 tz rst  0x40000000
+l1 tz len  0x00200000
+l1 ttbr0 off 0x00108000
+l1 ttbr1 off 0x0010C000
+l1 tz ns base 0x30600000
+l1 scratch pa 0x401E3000
+l1: scratch page verified unmapped
+l1 rx template desc 0x4018865E
+l1 target sva 0x00215000
+l1 target desc pa 0x40101454
+l1 desc sva 0x0003C454
+l1 scratch sp 0x00580200
+l1 new desc 0x401E3052
+l1 desc write ret 0x00000000
+l1 desc readback 0x401E3052
+l1: stub visible through the new secure mapping, executing per core
+l1 scratch sp 0x00580200
+  thread entered, stub 0x00215000
+  core      0x00000000
+  actlr before 0x00000149
+  actlr after  0x0000014B
+  smc ret      0x0000014B
+  thread entered, stub 0x00215000
+  core      0x00000001
+  actlr before 0x00000149
+  actlr after  0x0000014B
+  smc ret      0x0000014B
+  thread entered, stub 0x00215000
+  core      0x00000002
+  actlr before 0x00000149
+  actlr after  0x0000014B
+  smc ret      0x0000014B
+  thread entered, stub 0x00215000
+  core      0x00000003
+  actlr before 0x00000149
+  actlr after  0x0000014B
+  smc ret      0x0000014B
+l1 cores with the requested ACTLR bits, of 4: 0x00000004
+actlr: requested bits APPLIED on all cores
+l1: scratch cleared, secure mapping removed
+l2 prefetch_ctrl sva->pa 0x1A002F60
+l2 prefetch_ctrl before 0x21000000
+l2 prefetch_ctrl after  0x3100000F
+pl310: requested fields APPLIED
+resume: settings will be re-applied after every wake from sleep
+---- probe: per-core CPU regs (read-only, no SMC) ----
+  core  0x00000000
+    midr  0x412FC09A
+    actlr 0x0000014B
+    clidr 0x09200003
+    ctr   0x83338003
+  core  0x00000001
+    midr  0x412FC09A
+    actlr 0x0000014B
+    clidr 0x09200003
+    ctr   0x83338003
+  core  0x00000002
+    midr  0x412FC09A
+    actlr 0x0000014B
+    clidr 0x09200003
+    ctr   0x83338003
+  core  0x00000003
+    midr  0x412FC09A
+    actlr 0x0000014B
+    clidr 0x09200003
+    ctr   0x83338003
+==== vita_cpu_tweaks boot done ====

@@ -33,6 +33,5 @@ target_link_libraries(cpu_tweaks
   ScePowerForDriver_stub
   taihenModuleUtils_stub
   SceDebugForDriver_stub
-  SceDebugForKernel_stub
 )
 vita_create_self(cpu_tweaks.skprx cpu_tweaks CONFIG ${CMAKE_SOURCE_DIR}/cpu_tweaks.yml UNSAFE)

@@ -324,6 +324,47 @@ static int kprintf_noop_handler(int unk, const char *format, va_list args)
     return 0;
 }
 
+/*
+ * taiHEN: looks up a kernel export by library and function NID, and fails
+ * cleanly if it doesn't exist. Used for every export whose NIDs differ
+ * between firmwares, so the module never imports a NID the running
+ * firmware lacks - one unresolvable import and the kernel refuses to load
+ * the whole module.
+ */
+extern int module_get_export_func(SceUID pid, const char *modname,
+                                  unsigned int libnid, unsigned int funcnid,
+                                  uintptr_t *func);
+#define KERNEL_PID 0x10005
+
+/* ksceKernelRegisterKprintfHandler (SceSysmem, SceDebugForKernel) changed
+ * NIDs in 3.63; checked against the decrypted sysmem of 3.60-3.74. */
+static const struct { unsigned int lib, fn; } kprintf_nids[] = {
+    { 0x88C17370u, 0x10067B7Bu },   /* 3.60, 3.61 */
+    { 0x13D793B7u, 0x88AD6D0Cu },   /* 3.63 - 3.74 */
+};
+typedef int (*kprintf_handler_t)(int, const char *, va_list);
+static int (*g_register_kprintf)(kprintf_handler_t, void *);
+
+static void resolve_kprintf(void)
+{
+    for (unsigned int i = 0; i < sizeof(kprintf_nids) / sizeof(kprintf_nids[0]); i++) {
+        uintptr_t fn = 0;
+        if (module_get_export_func(KERNEL_PID, "SceSysmem", kprintf_nids[i].lib,
+                                   kprintf_nids[i].fn, &fn) >= 0 && fn) {
+            g_register_kprintf = (int (*)(kprintf_handler_t, void *))fn;
+            return;
+        }
+    }
+}
+
+/* Capturing psp2spl's output is a nice-to-have: without the export the log
+ * just lacks those lines. */
+static void set_kprintf_handler(kprintf_handler_t h)
+{
+    if (g_register_kprintf)
+        g_register_kprintf(h, NULL);
+}
+
 static void log_hex_line(const char *prefix, unsigned int v)
 {
     static const char hexd[] = "0123456789ABCDEF";
@@ -494,9 +535,9 @@ static void probe_secure_layout(void)
     }
 
     log_line("---- probe: PRINTTBR(1) ----");
-    ksceKernelRegisterKprintfHandler(kprintf_capture_handler, NULL);
+    set_kprintf_handler(kprintf_capture_handler);
     int pr = SPLx_TZS_PRINTTBR(1);
-    ksceKernelRegisterKprintfHandler(kprintf_noop_handler, NULL);
+    set_kprintf_handler(kprintf_noop_handler);
     log_hex_line("probe printtbr ret ", (unsigned int)pr);
     log_hex_line("probe log used ", (unsigned int)g_log_len);
     flush_log_to_disk(); /* persist the dump before any later probe can die */
@@ -1500,16 +1541,13 @@ static int consume_once_in_config(void)
  * kscePowerSetGpuClockFrequency, which turned out not to be exported (boot
  * 38), so an export is only called once the kernel has confirmed it exists.
  */
-extern int module_get_export_func(SceUID pid, const char *modname,
-                                  unsigned int libnid, unsigned int funcnid,
-                                  uintptr_t *func);
 #define SCE_POWER_FOR_DRIVER_NID       0x1590166Fu
 #define KSCE_POWER_REQUEST_COLD_RESET  0x0442D852u
 
 static void bench_reboot(void)
 {
     uintptr_t fn = 0;
-    int r = module_get_export_func(0x10005 /* KERNEL_PID */, "ScePower",
+    int r = module_get_export_func(KERNEL_PID, "ScePower",
                                    SCE_POWER_FOR_DRIVER_NID,
                                    KSCE_POWER_REQUEST_COLD_RESET, &fn);
     log_hex_line("bench: cold reset lookup ", (unsigned int)r);
@@ -1593,10 +1631,10 @@ static void reapply_after_resume(void)
     log_line("resume: ACTLR as found after wake:");
     probe_cpu_regs();
 
-    ksceKernelRegisterKprintfHandler(kprintf_capture_handler, NULL);
+    set_kprintf_handler(kprintf_capture_handler);
     int r = SPLx_CFK_INIT(SPL_IFL(_LV0) | SPL_IFL(_TZS) | SPL_IFL(_RESET), 0, 1, 0,
                           SPLV0_COMMBACKUP_CRITICAL);
-    ksceKernelRegisterKprintfHandler(kprintf_noop_handler, NULL);
+    set_kprintf_handler(kprintf_noop_handler);
     log_hex_line("resume: cfk re-init ret ", (unsigned int)r);
     if (r < 0) {
         log_line("resume: psp2spl re-init FAILED - settings NOT re-applied after wake");
@@ -1663,6 +1701,9 @@ int module_start(SceSize argc, const void *args)
 
     g_log_len = 0;
     log_line("==== vita_cpu_tweaks boot start ====");
+    resolve_kprintf();
+    if (!g_register_kprintf)
+        log_line("kprintf export unavailable: psp2spl output not captured");
 
     struct pfe_config cfg;
     read_config(&cfg);
@@ -1696,10 +1737,10 @@ int module_start(SceSize argc, const void *args)
 
     {
         SPLx_CFK_PREP(NULL, 0, "[CPUT]");
-        ksceKernelRegisterKprintfHandler(kprintf_capture_handler, NULL);
+        set_kprintf_handler(kprintf_capture_handler);
         int ret = SPLx_CFK_INIT(SPL_IFL(_LV0) | SPL_IFL(_TZS), 0, 1, 1,
                                  SPLV0_COMMBACKUP_CRITICAL);
-        ksceKernelRegisterKprintfHandler(kprintf_noop_handler, NULL);
+        set_kprintf_handler(kprintf_noop_handler);
         log_hex_line("cfk_init_ret ", (unsigned int)ret);
         if (ret < 0) { log_line("CFK init failed, aborting"); goto write_out; }
         flush_log_to_disk(); /* checkpoint: past the point every prior boot failed at */
