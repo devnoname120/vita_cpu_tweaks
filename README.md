@@ -125,7 +125,7 @@ before switching to `enable = on`.
 
 ## Installing
 
-1. Copy `cpu_tweaks.skprx` ([built as below](#building)) to
+1. Copy `cpu_tweaks.skprx` (from the [latest release](../../releases/latest), or [built as below](#building)) to
    `ur0:tai/cpu_tweaks.skprx`.
 2. Add it under `*KERNEL` in `ur0:tai/config.txt`:
    ```
