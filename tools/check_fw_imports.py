@@ -7,7 +7,9 @@ plugin, whether that library NID and each function NID exist.
 
   tools/check_fw_imports.py build/cpu_tweaks.velf FW_DIR [FW_DIR...]
 
-FW_DIR is e.g. .../decrypted/external/official/3.73 (needs fs_dec/os0).
+FW_DIR is any firmware tree with a decrypted fs_dec/os0 - retail, devkit,
+testkit or internal, e.g. .../decrypted/external/official/3.73. Every file
+in it with an ELF header is read, whatever its extension.
 taiHEN's own libraries (taihen*) are skipped: they are not firmware.
 """
 import struct
@@ -60,11 +62,28 @@ def imports(path):
 
 
 def exports(path):
-    """[(module, lib name, lib nid, set(nids))] for one decrypted ELF."""
+    """[(module, lib name, lib nid, set(nids))] for one decrypted ELF file.
+
+    A bootimage also carries its embedded kernel modules as plain ELFs; those
+    are read too, so trees where nobody extracted them still count."""
+    with open(path, "rb") as f:
+        if f.read(4) != b"\x7fELF":
+            return []
     d = Path(path).read_bytes()
-    if d[:4] != b"\x7fELF":
+    out = exports_of(d)
+    if "bootimage" in Path(path).name:
+        i = d.find(b"\x7fELF", 1)
+        while i >= 0:
+            out += exports_of(d[i:])
+            i = d.find(b"\x7fELF", i + 1)
+    return out
+
+
+def exports_of(d):
+    try:
+        segs = segments(d)
+    except struct.error:
         return []
-    segs = segments(d)
     off = mapper(segs)
     try:
         seg, mi = module_info(d, segs)
@@ -73,7 +92,7 @@ def exports(path):
     except (ValueError, IndexError, struct.error):
         return []
     p, out = seg[1] + top, []
-    while p < seg[1] + btm:
+    while p < seg[1] + btm and p + 0x20 <= len(d):
         size, _, _, nfunc, nvar = struct.unpack_from("<5H", d, p)
         lib_nid, name_va, nid_va = struct.unpack_from("<3I", d, p + 0x10)
         if size == 0:
@@ -82,7 +101,7 @@ def exports(path):
             name = cstr(d, off(name_va)) if name_va else "(main)"
             nids = {struct.unpack_from("<I", d, off(nid_va) + 4 * i)[0]
                     for i in range(nfunc + nvar)}
-        except ValueError:
+        except (ValueError, struct.error):
             name, nids = "?", set()
         out.append((mod, name, lib_nid, nids))
         p += size
@@ -94,7 +113,9 @@ def main():
     bad_any = False
     for fw in sys.argv[2:]:
         libs = {}
-        for elf in sorted(Path(fw, "fs_dec", "os0").rglob("*.elf")):
+        for elf in sorted(Path(fw, "fs_dec", "os0").rglob("*")):
+            if not elf.is_file() or elf.suffix in (".i64", ".idb"):
+                continue
             for mod, name, nid, nids in exports(elf):
                 libs.setdefault(nid, (mod, name, set()))[2].update(nids)
         missing = []
@@ -105,7 +126,7 @@ def main():
             gone = [f"0x{n:08X}" for n in fnids if n not in libs[nid][2]]
             if gone:
                 missing.append(f"{name} 0x{nid:08X}: missing " + " ".join(gone))
-        print(f"{Path(fw).name}: " + ("all imports resolve" if not missing else ""))
+        print(f"{fw}: " + ("all imports resolve" if not missing else ""))
         for m in missing:
             print("    " + m)
         bad_any |= bool(missing)

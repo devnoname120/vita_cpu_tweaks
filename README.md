@@ -111,8 +111,9 @@ and across sleep/wake.
 - **Firmware 3.60–3.74 only.** The plugin relies on
   [psp2spl](https://github.com/SKGleba/psp2spl) for secure-world (TrustZone)
   access, and psp2spl only supports that range. The plugin's imports are
-  checked against the decrypted kernel modules of every retail firmware in
-  that range (`tools/check_fw_imports.py`), but it has only run on 3.60.
+  checked against the decrypted kernel modules of every retail, devkit,
+  testkit and internal firmware build in that range
+  (`tools/check_fw_imports.py`), but it has only run on retail 3.60.
 - **No hardcoded addresses.** Every secure-world address is read from the
   live secure page tables at boot, and every step is checked. If something
   doesn't match what the plugin expects, it aborts that step and logs the
